@@ -1,0 +1,500 @@
+"use client"
+
+import { useEffect, useState, useMemo } from "react"
+import { Chart } from "react-chartjs-2"
+import {
+  Chart as ChartJS,
+  CategoryScale,
+  LinearScale,
+  BarController,
+  BarElement,
+  LineController,
+  LineElement,
+  PointElement,
+  Title,
+  Tooltip,
+  Legend,
+  Filler,
+} from "chart.js"
+
+ChartJS.register(CategoryScale, LinearScale, BarController, BarElement, LineController, LineElement, PointElement, Title, Tooltip, Legend, Filler)
+
+interface WaterQualityData {
+  level: number
+  ph: number
+  tds: number
+  chartData: {
+    labels: string[]
+    level: number[]
+    ph: number[]
+    tds: number[]
+  }
+}
+
+import { generateWaterHistory, generateTimeLabels, type TimeRange } from "@/utils/data-simulator"
+import { Maximize2 } from "lucide-react"
+
+interface WaterQualityCardProps {
+  data: WaterQualityData
+  activeMetric: string | null
+  onMetricSelect: (metric: string | null) => void
+  onExpand?: () => void
+  isOffline?: boolean
+  compact?: boolean
+  isMotorOn?: boolean
+  mode?: "full" | "bar-only" | "line-only"
+  transparent?: boolean
+  timeRange?: TimeRange
+  onTimeRangeChange?: (range: TimeRange) => void
+}
+
+export function WaterQualityCard({
+  data,
+  activeMetric,
+  onMetricSelect,
+  onExpand,
+  isOffline = false,
+  compact = false,
+  mode,
+  transparent = false,
+  timeRange = "1h",
+  onTimeRangeChange,
+  isMotorOn = false
+}: WaterQualityCardProps) {
+  const [isVisible, setIsVisible] = useState(false)
+  const [hoveredMetric, setHoveredMetric] = useState<string | null>(null)
+  const [animatedValues, setAnimatedValues] = useState({
+    level: 0,
+    ph: 0,
+    tds: 0,
+  })
+
+  useEffect(() => {
+    setIsVisible(true)
+  }, [])
+
+  useEffect(() => {
+    const duration = 1200
+    const startTime = Date.now()
+    const startValues = { ...animatedValues }
+
+    const animate = () => {
+      const elapsed = Date.now() - startTime
+      const progress = Math.min(elapsed / duration, 1)
+      const eased = 1 - Math.pow(1 - progress, 3)
+
+      setAnimatedValues({
+        level: startValues.level + (data.level - startValues.level) * eased,
+        ph: startValues.ph + (data.ph - startValues.ph) * eased,
+        tds: startValues.tds + (data.tds - startValues.tds) * eased,
+      })
+
+      if (progress < 1) requestAnimationFrame(animate)
+    }
+
+    animate()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [data.level, data.ph, data.tds])
+
+  // ==========================================
+  // STATIC BAR CHART PREPARATION (OLD STYLE)
+  // ==========================================
+  /* Short labels so x-axis fits without clipping in tight tiles */
+  const allLabels = ["Level", "pH", "TDS"]
+  const allLineData = [animatedValues.level, animatedValues.ph, animatedValues.tds]
+  const allBarData = [animatedValues.level, animatedValues.ph, animatedValues.tds]
+
+  const barChartData = {
+    labels: allLabels,
+    datasets: [
+      {
+        type: 'line' as const,
+        label: 'Trend',
+        data: allLineData,
+        borderColor: "rgba(143, 211, 255, 0.5)",
+        borderWidth: 2,
+        tension: 0.4,
+        pointRadius: 6,
+        pointBackgroundColor: [
+          (activeMetric === null || activeMetric === "level" || hoveredMetric === "level") ? "rgba(143, 211, 255, 1)" : "rgba(143, 211, 255, 0.1)",
+          (activeMetric === null || activeMetric === "ph" || hoveredMetric === "ph") ? "rgba(124, 255, 154, 1)" : "rgba(124, 255, 154, 0.1)",
+          (activeMetric === null || activeMetric === "tds" || hoveredMetric === "tds") ? "rgba(255, 211, 106, 1)" : "rgba(255, 211, 106, 0.1)",
+        ],
+        pointBorderColor: "#0f172a",
+        pointBorderWidth: 2,
+        order: 0,
+      },
+      {
+        type: 'bar' as const,
+        label: 'Value',
+        data: allBarData,
+        backgroundColor: [
+          (activeMetric === null || activeMetric === "level" || hoveredMetric === "level") ? "rgba(6, 182, 212, 1)" : "rgba(6, 182, 212, 0.1)",
+          (activeMetric === null || activeMetric === "ph" || hoveredMetric === "ph") ? "rgba(34, 197, 94, 1)" : "rgba(34, 197, 94, 0.1)",
+          (activeMetric === null || activeMetric === "tds" || hoveredMetric === "tds") ? "rgba(251, 191, 36, 1)" : "rgba(251, 191, 36, 0.1)",
+        ],
+        borderRadius: 8,
+        barThickness: 50,
+        order: 1,
+      }
+    ]
+  }
+
+  const barChartOptions = {
+    responsive: true,
+    maintainAspectRatio: false,
+    layout: {
+      padding: { top: 8, right: 10, bottom: 28, left: 8 },
+    },
+    plugins: {
+      legend: { display: false },
+      tooltip: {
+        backgroundColor: "rgba(2, 6, 23, 0.9)",
+        titleColor: "#94a3b8",
+        bodyColor: "#f1f5f9",
+        borderColor: "rgba(148, 163, 184, 0.1)",
+        borderWidth: 1,
+        padding: 10,
+        displayColors: false,
+        callbacks: {
+          label: (context: any) => `Value: ${context.parsed.y?.toFixed(2) ?? 'N/A'}`,
+        },
+      }
+    },
+    scales: {
+      x: {
+        offset: true,
+        ticks: {
+          color: "#94a3b8",
+          font: { size: 10 },
+          maxRotation: 0,
+          autoSkip: false,
+        },
+        grid: { display: false },
+        border: { display: true, color: "rgba(148, 163, 184, 0.25)" },
+      },
+      y: {
+        ticks: { color: "#94a3b8", font: { size: 10 } },
+        beginAtZero: true,
+        grace: "5%",
+        grid: { color: "rgba(148, 163, 184, 0.08)" },
+        border: { display: true, color: "rgba(148, 163, 184, 0.25)" },
+      },
+    },
+    animation: {
+      duration: 750,
+      easing: "easeInOutQuart" as const,
+    }
+  }
+
+  // ==========================================
+  // LIVE TIME-SERIES CHART PREPARATION
+  // ==========================================
+  // Determine which metric to show on the live chart
+  const chartMetric = activeMetric || "level"
+  const metricConfig: Record<string, { label: string; color: string; bgColor: string; unit: string }> = {
+    level: { label: "Water Level", color: "rgb(34, 211, 238)", bgColor: "rgba(34, 211, 238, 0.1)", unit: "ft" },
+    ph: { label: "pH Level", color: "rgb(74, 222, 128)", bgColor: "rgba(74, 222, 128, 0.1)", unit: "" },
+    tds: { label: "TDS", color: "rgb(251, 191, 36)", bgColor: "rgba(251, 191, 36, 0.1)", unit: "ppm" },
+  }
+  const cfg = metricConfig[chartMetric] || metricConfig.level
+
+  // ==========================================
+  // SIMULATION / HISTORY PREPARATION
+  // ==========================================
+  const simulatedHistory = useMemo(() => {
+    if (timeRange === "1h") {
+      const labels = (data.chartData?.labels || []).map(l => {
+        const d = new Date(l)
+        return !isNaN(d.getTime()) ? d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }) : l
+      });
+      return {
+        labels,
+        level: data.chartData?.level || [],
+        ph: data.chartData?.ph || [],
+        tds: data.chartData?.tds || [],
+      };
+    }
+
+    // Generate simulated history for 24h / 7d
+    const count = timeRange === "24h" ? 100 : 300;
+    const labels = generateTimeLabels(timeRange, count).map(l => new Date(l).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }));
+    return generateWaterHistory(data, timeRange, isMotorOn, count, labels);
+  }, [data, timeRange, isMotorOn]);
+
+  const timeLabels = simulatedHistory.labels;
+  const chartValues = (simulatedHistory as any)?.[chartMetric] || [];
+
+  const liveChartData = {
+    labels: timeLabels,
+    datasets: mode === "line-only" ? [
+      {
+        label: "Water Level (ft)",
+        data: (data.chartData as any)?.level || [],
+        borderColor: "rgb(34, 211, 238)",
+        backgroundColor: "rgba(34, 211, 238, 0.05)",
+        borderWidth: 2,
+        tension: 0.4,
+        fill: true,
+        pointRadius: 0,
+        pointHoverRadius: 5,
+        pointBackgroundColor: "rgb(34, 211, 238)",
+      },
+      {
+        label: "pH Level",
+        data: (data.chartData as any)?.ph || [],
+        borderColor: "rgb(74, 222, 128)",
+        backgroundColor: "rgba(74, 222, 128, 0.05)",
+        borderWidth: 2,
+        tension: 0.4,
+        fill: true,
+        pointRadius: 0,
+        pointHoverRadius: 5,
+        pointBackgroundColor: "rgb(74, 222, 128)",
+      },
+      {
+        label: "TDS (ppm)",
+        data: (data.chartData as any)?.tds || [],
+        borderColor: "rgb(251, 191, 36)",
+        backgroundColor: "rgba(251, 191, 36, 0.05)",
+        borderWidth: 2,
+        tension: 0.4,
+        fill: true,
+        pointRadius: 0,
+        pointHoverRadius: 5,
+        pointBackgroundColor: "rgb(251, 191, 36)",
+      }
+    ] : [
+      {
+        label: cfg.label,
+        data: chartValues,
+        borderColor: cfg.color,
+        backgroundColor: cfg.bgColor,
+        borderWidth: 2,
+        tension: 0.1, // Less smooth for water physics to look more "recharge" like if needed
+        fill: true,
+        pointRadius: 0,
+        pointHoverRadius: 5,
+        pointBackgroundColor: cfg.color,
+        pointBorderColor: "#0f172a",
+        pointBorderWidth: 1,
+      },
+    ],
+  }
+
+  const liveChartOptions = {
+    responsive: true,
+    maintainAspectRatio: false,
+    plugins: {
+      legend: {
+        display: mode === "line-only",
+        position: 'top' as const,
+        labels: {
+          color: '#e2e8f0',
+          boxWidth: 10,
+          usePointStyle: true,
+          pointStyle: 'rectRounded',
+          font: { size: 10, weight: 'normal' as any },
+          padding: 10
+        }
+      },
+      tooltip: {
+        backgroundColor: "rgba(2, 6, 23, 0.9)",
+        titleColor: "#94a3b8",
+        bodyColor: "#f1f5f9",
+        borderColor: "rgba(148, 163, 184, 0.1)",
+        borderWidth: 1,
+        padding: 8,
+        displayColors: mode === "line-only",
+      },
+    },
+    scales: {
+      x: {
+        ticks: { color: "#475569", font: { size: 9 }, maxTicksLimit: 6 },
+        grid: { display: false },
+        border: { display: false },
+      },
+      y: {
+        ticks: { color: "#475569", font: { size: 9 } },
+        beginAtZero: true,
+        grid: { color: "rgba(148, 163, 184, 0.05)" },
+        border: { display: false },
+      },
+    },
+    animation: { duration: 500 },
+  }
+
+  // Visibility flags based on mode
+  const showTiles = !mode || mode === "full"
+  const showBar = mode === "bar-only" || ((!mode || mode === "full") && !compact)
+  const showLiveChart = mode === "line-only" || ((!mode || mode === "full") && !compact)
+  const cardTitle = mode === "line-only" ? "Water Level Trend" : "Water Quality"
+
+  const metrics = [
+    {
+      key: "level",
+      label: "Ground\nWater Level",
+      value: animatedValues.level.toFixed(1),
+      unit: "ft",
+      color: "text-cyan-400",
+      hoverColor: "text-cyan-300",
+      glow: "drop-shadow-[0_0_10px_rgba(143,211,255,0.5)]",
+      bgGlow: "shadow-[0_0_25px_rgba(143,211,255,0.3)]"
+    },
+    {
+      key: "ph",
+      label: "pH Level",
+      value: animatedValues.ph.toFixed(1),
+      range: "Within 6.5 - 8.5",
+      color: "text-emerald-400",
+      hoverColor: "text-emerald-300",
+      glow: "drop-shadow-[0_0_10px_rgba(124,255,154,0.5)]",
+      bgGlow: "shadow-[0_0_25px_rgba(124,255,154,0.3)]"
+    },
+    {
+      key: "tds",
+      label: "TDS",
+      value: animatedValues.tds.toFixed(1),
+      unit: "ppm",
+      color: "text-amber-400",
+      hoverColor: "text-amber-300",
+      glow: "drop-shadow-[0_0_10px_rgba(255,211,106,0.5)]",
+      bgGlow: "shadow-[0_0_25px_rgba(255,211,106,0.3)]"
+    },
+  ]
+
+  return (
+    <div
+      className={`${transparent ? '' : 'relative h-full w-full overflow-hidden rounded-2xl border border-white/5 bg-slate-900/40 p-3 backdrop-blur-xl hover:shadow-[0_0_30px_rgba(6,182,212,0.1)]'} group flex min-h-0 flex-col transition-all duration-200 ${isVisible ? "opacity-100" : "opacity-0"
+        } ${isOffline ? 'opacity-50 blur-[2px] pointer-events-none' : 'cursor-pointer'}`}
+      style={{ transitionDelay: "100ms" }}
+      onClick={onExpand}
+    >
+      {isOffline && (
+        <div className="absolute top-4 right-12 z-50 bg-red-500 text-white text-[10px] font-bold px-2 py-0.5 rounded-full animate-pulse">
+          OFFLINE
+        </div>
+      )}
+      {/* Animated background - removed to match Yearly Comparison style */}
+
+      {!transparent && (
+        <div className="relative z-10 mb-4 flex flex-col sm:flex-row items-center justify-between gap-3">
+          <div className="flex items-center gap-2">
+            <img
+              src="/humidity.png"
+              alt="Water Logo"
+              className="h-6 object-contain rounded-full"
+            />
+            <h2 className="bg-gradient-to-r from-cyan-400 to-blue-400 bg-clip-text text-[15px] font-bold uppercase tracking-[0.2em] text-transparent">
+              {cardTitle}
+            </h2>
+          </div>
+
+          <div className="flex items-center gap-2">
+            {/* Time Range Selector */}
+            {onTimeRangeChange && (
+              <div className="flex items-center gap-1 bg-slate-900/50 p-1 rounded-lg border border-white/5">
+                {(["1h", "24h", "7d"] as const).map((range) => (
+                  <button
+                    key={range}
+                    onClick={(e) => { e.stopPropagation(); onTimeRangeChange(range); }}
+                    className={`px-2 py-0.5 rounded text-[11px] font-black uppercase transition-all ${timeRange === range
+                      ? "bg-cyan-500/20 text-cyan-400 shadow-[0_0_10px_rgba(6,182,212,0.2)]"
+                      : "text-slate-500 hover:text-slate-400"
+                      }`}
+                  >
+                    {range}
+                  </button>
+                ))}
+              </div>
+            )}
+
+            {onExpand && (
+              <button
+                onClick={(e) => { e.stopPropagation(); onExpand(); }}
+                className="rounded-full bg-white/5 p-1.5 text-cyan-400/70 transition-colors hover:bg-white/10 hover:text-cyan-400"
+              >
+                <Maximize2 className="h-3.5 w-3.5" />
+              </button>
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* Metrics Grid — hidden in bar-only / line-only modes */}
+      {showTiles && <div className={`relative z-10 mt-3 mb-2 grid grid-cols-3 gap-1.5`}>
+        {metrics.map((m, i) => (
+          <div
+            key={m.label}
+            onClick={(e) => {
+              e.stopPropagation();
+              onMetricSelect(m.key === activeMetric ? null : m.key);
+            }}
+            className={`group/item cursor-pointer rounded-xl border p-3 text-center backdrop-blur-sm transition-all duration-200 ${(activeMetric === m.key)
+              ? `border-cyan-500/50 bg-cyan-500/10 ${m.bgGlow}`
+              : "border-white/5 bg-slate-900/50 hover:border-cyan-500/30 hover:bg-slate-800/50 opacity-80 hover:opacity-100"
+              }`}
+            style={{ animationDelay: `${i * 100}ms` }}
+            onMouseEnter={() => setHoveredMetric(m.key)}
+            onMouseLeave={() => setHoveredMetric(null)}
+          >
+            <div className={`mb-1 whitespace-pre-line text-[9px] font-semibold uppercase tracking-wider transition-colors ${activeMetric === m.key ? "text-cyan-300" : "text-slate-500"
+              }`}>
+              {m.label}
+            </div>
+            <div
+              className={`text-2xl font-bold transition-all duration-300 ${(activeMetric === m.key || hoveredMetric === m.key) ? `${m.hoverColor} ${m.glow}` : `${m.color} ${m.glow}`
+                }`}
+            >
+              {m.value}
+            </div>
+            {m.unit && <div className="text-[10px] text-slate-500">{m.unit}</div>}
+            {m.range && <div className="text-[8px] text-slate-500">{m.range}</div>}
+          </div>
+        ))}
+      </div>}
+
+      {/* Bar Chart Section — visible in bar-only mode or full non-compact */}
+      {showBar && (
+        <div
+          className={`relative z-10 mb-4 flex min-h-0 flex-1 flex-col ${mode === "bar-only" ? "min-h-[160px]" : "min-h-[140px]"}`}
+        >
+          <div className="mb-2 flex shrink-0 items-center justify-between">
+            <h3 className="text-xs font-medium uppercase tracking-widest text-slate-400">
+              Water Quality
+            </h3>
+            {activeMetric && (
+              <button
+                onClick={(e) => {
+                  e.stopPropagation();
+                  onMetricSelect(null);
+                }}
+                className="text-[10px] font-bold text-cyan-400 hover:text-cyan-300 transition-colors uppercase tracking-wider"
+              >
+                Show All Metrics
+              </button>
+            )}
+          </div>
+          {/* Explicit height so Chart.js (maintainAspectRatio: false) reserves space for x/y ticks */}
+          <div
+            className={`relative w-full flex-1 ${mode === "bar-only" ? "min-h-[180px]" : "min-h-[160px]"}`}
+          >
+            <Chart type="bar" data={barChartData} options={barChartOptions as any} />
+          </div>
+        </div>
+      )}
+
+      {/* Embedded Live Time-Series Chart — visible in line-only mode or full non-compact */}
+      {showLiveChart && (
+        <div className={`relative z-10 flex-1 flex flex-col min-h-[160px] ${mode === "line-only" ? "" : "mt-4 border-t border-white/5 pt-4"}`}>
+          <div className="flex-1 h-[160px] min-h-[140px]">
+            <Chart type="line" data={liveChartData} options={liveChartOptions as any} />
+          </div>
+        </div>
+      )}
+
+      {/* Animated border */}
+      <div className="pointer-events-none absolute inset-0 rounded-2xl border border-cyan-500/10 transition-colors duration-300 group-hover:border-cyan-500/30" />
+    </div>
+  )
+}

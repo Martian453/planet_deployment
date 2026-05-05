@@ -1,0 +1,1181 @@
+"use client"
+
+import { useEffect, useState, useRef, useMemo } from "react"
+import { AirQualityCard } from "@/components/air-quality-card"
+import { LoadingScreen } from "@/components/loading-screen"
+import { SpeedometerGauge } from "@/components/environmental-core"
+import { calculateAQI } from "@/utils/aqi-calculator"
+import { WaterQualityCard } from "@/components/water-quality-card"
+import { SidebarNavigation } from "@/components/sidebar-navigation"
+import { PollutantDonutChart } from "@/components/charts/pollutant-donut-chart"
+import { MetricHistoryChart } from "@/components/charts/aqi-forecast-chart"
+import { RecentReadingsTable, RecentReadingsExpandModal } from "@/components/recent-readings-table"
+import { ChartModal } from "@/components/chart-modal"
+import { AQIPollutantHub } from "@/components/aqi-pollutant-hub"
+import { WaterAnalysisSplit } from "@/components/analysis/water-split"
+import { BorewellHealthIndex } from "@/components/analysis/health-index"
+import { BorewellMonitorCard } from "@/components/borewell-monitor-card"
+import { AiSummarizerCard } from "@/components/ai-summarizer-card"
+import dynamic from "next/dynamic"
+import { useRealtimeData } from "@/hooks/useRealtimeData"
+import { useAuth } from "@/components/auth-provider"
+import { getApiUrl } from "@/lib/api-url"
+import { buildHistoricalReadingsSeries, buildYearlyMonthlyWaterLevelComparison, type HistoricalPeriod } from "@/lib/historical-readings"
+import { calculateNextWaterLevel } from "@/utils/data-simulator"
+import { Wifi, WifiOff, Cpu, MapPin, Trash2, Menu } from "lucide-react"
+
+type AirState = {
+    pm25: number; pm10: number; co2: number; tvoc: number; hcho: number; temp: number; humidity: number;
+    chartData: { labels: string[], pm25: number[], pm10: number[], co2: number[], tvoc: number[], hcho: number[], temp: number[], humidity: number[] }
+};
+
+type WaterState = {
+    level: number; ph: number; tds: number; irms: number; pump_status: string;
+    chartData: { labels: string[], level: number[], ph: number[], tds: number[] }
+};
+
+function clamp(n: number, min: number, max: number) {
+    return Math.max(min, Math.min(max, n));
+}
+
+function rand(min: number, max: number) {
+    return min + Math.random() * (max - min);
+}
+
+function nextRandomWalk(prev: number, delta: number, min: number, max: number) {
+    return clamp(prev + rand(-delta, delta), min, max);
+}
+
+function timeLabelNow() {
+    return new Date().toLocaleTimeString('en-US', { hour12: false, hour: '2-digit', minute: '2-digit' });
+}
+
+// Dynamically import Global Globe
+const GlobalComparativeGlobe = dynamic(
+    () => import("@/components/globe/comparative-globe").then((mod) => mod.GlobalComparativeGlobe),
+    { ssr: false }
+)
+
+export function PrivateDashboard() {
+    const { token, user } = useAuth();
+    const [mousePosition, setMousePosition] = useState({ x: 0, y: 0 })
+    const [isSidebarOpen, setIsSidebarOpen] = useState(false)
+    const [maxWaterLevel, setMaxWaterLevel] = useState(0)
+    const hasAutoSelected = useRef(false); // Track smart auto-selection
+    const [waterStatus, setWaterStatus] = useState<string | null>(null)
+    // PRODUCTIZATION STATE
+    // PRODUCTIZATION STATE
+    const [selectedPollutant, setSelectedPollutant] = useState<string | null>(null);
+    const [selectedWaterMetric, setSelectedWaterMetric] = useState<string | null>(null);
+    const [modalConfig, setModalConfig] = useState<{ isOpen: boolean; type: 'aqi' | 'water' | null }>({ isOpen: false, type: null });
+    const [timeRange, setTimeRange] = useState<"1h" | "24h" | "7d">("1h");
+    const [readingsPeriod, setReadingsPeriod] = useState<HistoricalPeriod>("week")
+    const [readingsModalOpen, setReadingsModalOpen] = useState(false)
+    const [activeBorewellIndex, setActiveBorewellIndex] = useState(0);
+    const [borewells, setBorewells] = useState([
+        { id: 1, isMotorOn: true, runTime: 4.5 * 3600 },
+        { id: 2, isMotorOn: false, runTime: 1.2 * 3600 },
+        { id: 3, isMotorOn: false, runTime: 0.8 * 3600 },
+    ]);
+
+    // HYDRATION GUARD INITIALIZATION
+    const [mounted, setMounted] = useState(false);
+    const [demoMode, setDemoMode] = useState(true) // Set to true for HR Demo Mode
+    const [isInitialLoading, setIsInitialLoading] = useState(true);
+
+    useEffect(() => {
+        setMounted(true);
+        // Shortened for HR Demo (3 seconds)
+        const timer = setTimeout(() => setIsInitialLoading(false), 3000);
+        return () => clearTimeout(timer);
+    }, []);
+
+    // Navigation State
+    const [activeView, setActiveView] = useState("dashboard")
+
+    // Location Management
+    const [locations, setLocations] = useState<any[]>([])
+    const [currentLocation, setCurrentLocation] = useState("")
+    const [capabilities, setCapabilities] = useState({ has_aqi: true, has_water: true })
+
+    // Devices State
+    const [myDevices, setMyDevices] = useState<any[]>([])
+
+    // Real-Time Data Hook (Pass Token!)
+    const { data: wsData, isConnected: wsConnected, isLive, lastMessageTime, isOffline: wsOffline } = useRealtimeData(currentLocation, token);
+
+    // --- DATA STATES (Granular) ---
+    const [lastAirTime, setLastAirTime] = useState(0);
+    const [lastWaterTime, setLastWaterTime] = useState(0);
+    const [currentTime, setCurrentTime] = useState(Date.now());
+
+    // Update 'currentTime' every second for offline calc AND increment motor timers for all ON units
+    useEffect(() => {
+        const interval = setInterval(() => {
+            setCurrentTime(Date.now());
+            if (demoMode) {
+                setBorewells(prev => prev.map(bw => 
+                    bw.isMotorOn ? { ...bw, runTime: bw.runTime + 1 } : bw
+                ));
+            }
+        }, 1000);
+        return () => clearInterval(interval);
+    }, [demoMode]);
+
+    // --- AUTO-SWIPE LOGIC (Cycle Borewells every 6 seconds) ---
+    useEffect(() => {
+        // Only auto-swipe if we are not in a modal or actively interacting
+        const interval = setInterval(() => {
+            if (!modalConfig.isOpen) {
+                setActiveBorewellIndex(prev => (prev + 1) % 3);
+            }
+        }, 6000); // 6 seconds
+
+        return () => clearInterval(interval);
+    }, [modalConfig.isOpen]);
+
+    const isMotorOn = borewells[activeBorewellIndex].isMotorOn;
+    const motorRunTime = borewells[activeBorewellIndex].runTime;
+
+    const isAirOffline = false; // Forced active
+    const isWaterOffline = false; // Forced active
+
+    // Status Logic
+    let locationStatus: "ONLINE" | "PARTIAL" | "OFFLINE" = "OFFLINE";
+    if (!isAirOffline && !isWaterOffline) locationStatus = "ONLINE";
+    else if (!isAirOffline || !isWaterOffline) locationStatus = "PARTIAL";
+
+    const [airData, setAirData] = useState<AirState | null>(null);
+
+    const [waterData, setWaterData] = useState<WaterState | null>(null);
+
+    // --- ONLINE DETECTION (POLLING /api/locations/status) ---
+    const [isSystemOnline, setIsSystemOnline] = useState(true); // Forced true for UX
+    const [locationsStatus, setLocationsStatus] = useState<Record<string, { location_id: string; online: boolean; last_seen: string | null; latitude: number | null; longitude: number | null; name: string }>>({});
+
+    // API URL helper from shared utility
+
+    useEffect(() => {
+        if (demoMode) return;
+        if (!token) return;
+
+        const checkStatus = async () => {
+            try {
+                const res = await fetch(getApiUrl("/api/locations/status"), {
+                    headers: { "Authorization": `Bearer ${token}` }
+                });
+                if (res.ok) {
+                    const data: Array<{ location_id: string; online: boolean; last_seen: string | null; latitude: number | null; longitude: number | null; name: string }> = await res.json();
+                    // Map for easy lookup
+                    const statusMap: Record<string, { location_id: string; online: boolean; last_seen: string | null; latitude: number | null; longitude: number | null; name: string }> = {};
+                    let anyOnline = false;
+                    let currentLocOnline = false;
+
+                    data.forEach(loc => {
+                        statusMap[loc.location_id] = loc;
+                        if (loc.online) {
+                            anyOnline = true;
+                        }
+                        if (loc.location_id === currentLocation && loc.online) currentLocOnline = true;
+                    });
+
+                    // SMART AUTO-SWITCH LOGIC
+                    // If current location is OFFLINE, but we found another one ONLINE, switch to it!
+                    if (!currentLocOnline && anyOnline) {
+                        const onlineLoc = data.find(l => l.online);
+                        if (onlineLoc) {
+                            console.log(`🚀 Auto-switching from offline ${currentLocation} to online ${onlineLoc.location_id}`);
+                            setCurrentLocation(onlineLoc.location_id);
+
+                            // Reset data states
+                            setAirData(null);
+                            setWaterData(null);
+                            setMaxWaterLevel(0);
+
+                            // Assume new location is online immediately for UI snappiness
+                            currentLocOnline = true;
+                        }
+                    } else if (!hasAutoSelected.current && data.length > 0) {
+                        // Initial Load Fallback
+                        const firstOnline = data.find(l => l.online);
+                        if (firstOnline && (!currentLocation || firstOnline.location_id !== currentLocation)) {
+                            console.log("🚀 Initial Auto-select:", firstOnline.location_id);
+                            setCurrentLocation(firstOnline.location_id);
+                            currentLocOnline = true;
+                        }
+                        hasAutoSelected.current = true;
+                    }
+
+                    setLocationsStatus(statusMap);
+
+                    // Force update if we just auto-switched
+                    setIsSystemOnline(currentLocOnline);
+                }
+            } catch (err) {
+                console.warn("Location status poll failed", err);
+                setIsSystemOnline(false);
+            }
+        };
+
+        // Poll every 5 seconds
+        const interval = setInterval(checkStatus, 5000);
+        checkStatus();
+
+        return () => clearInterval(interval);
+    }, [token, currentLocation, demoMode]);
+
+    // SYSTEM STATUS: Driven by CLIENT SIDE HOOK (Priority) + Polling fallback
+    useEffect(() => {
+        if (demoMode) {
+            setIsSystemOnline(true);
+            return;
+        }
+        // If WebSocket hook says we are LIVE, we are definitely online.
+        if (isLive && !wsOffline) {
+            setIsSystemOnline(true);
+        } else {
+            // Fallback: If Hook is offline (maybe socket closed), check Polling status
+            const locStatus = locationsStatus[currentLocation];
+            // If polling says online, we trust it (maybe using HTTP ingest)
+            setIsSystemOnline(locStatus?.online || false);
+        }
+    }, [isLive, wsOffline, locationsStatus, currentLocation, demoMode]);
+
+
+    // 1. Fetch Locations on Mount (Auth)
+    useEffect(() => {
+        if (demoMode) return;
+        if (!token) return;
+
+        fetch(getApiUrl("/api/locations"), {
+            headers: { "Authorization": `Bearer ${token}` }
+        })
+            .then(res => res.json())
+            .then(data => {
+                if (Array.isArray(data) && data.length > 0) {
+                    setLocations(data);
+                    // Set default only if not set
+                    if (!currentLocation) setCurrentLocation(data[0].name);
+                }
+            })
+            .catch(err => console.error("Failed to fetch locations:", err));
+    }, [token, demoMode]);
+
+    // 2. Clear State on Location Switch
+    const handleLocationSelect = (locName: string) => {
+        setCurrentLocation(locName);
+        setAirData(null);
+        setWaterData(null);
+        setMaxWaterLevel(0);
+        setActiveView("dashboard");
+
+        // Immediate status check for new location from cache
+        if (locationsStatus[locName]?.online) {
+            setIsSystemOnline(true);
+        } else {
+            setIsSystemOnline(false);
+        }
+
+        // Fetch Capabilities... (existing code)
+        if (token) {
+            fetch(getApiUrl(`/api/location/${locName}/capabilities`), {
+                headers: { "Authorization": `Bearer ${token}` }
+            })
+                .then(res => res.json())
+                .then(data => {
+                    if (data && typeof data.has_aqi === 'boolean') {
+                        setCapabilities({ has_aqi: data.has_aqi, has_water: data.has_water });
+                    } else {
+                        // Default to showing everything if endpoint is missing or data is invalid
+                        console.warn("Capabilities endpoint missing or invalid, defaulting to FULL DASHBOARD");
+                        setCapabilities({ has_aqi: true, has_water: true });
+                    }
+                })
+                .catch((err) => {
+                    console.error("Capabilities fetch error:", err);
+                    setCapabilities({ has_aqi: true, has_water: true });
+                });
+        }
+    }
+
+    // 3. Fetch Devices... (Existing)
+    const fetchDevices = () => {
+        if (demoMode) return;
+        if (token) {
+            fetch(getApiUrl("/api/devices"), {
+                headers: { "Authorization": `Bearer ${token}` }
+            })
+                .then(res => res.json())
+                .then(data => setMyDevices(data))
+                .catch(err => console.error("Failed devices:", err));
+        }
+    }
+
+    useEffect(() => {
+        fetchDevices(); // Always fetch on mount for sensor status display
+    }, [token, demoMode]);
+
+    useEffect(() => {
+        if (activeView === "devices") {
+            fetchDevices();
+        }
+    }, [activeView, token, demoMode]);
+
+    // 3.5. Live Data Polling Fallback (Self-Healing if WS fails)
+    useEffect(() => {
+        if (demoMode) return; // Only if not in full demo
+        
+        const fetchLatestData = async () => {
+            try {
+                // Fetch latest AQI
+                const aqiRes = await fetch(getApiUrl("/api/aqi/history?limit=1"));
+                if (aqiRes.ok) {
+                    const history = await aqiRes.json();
+                    if (history.length > 0) {
+                        const latest = history[0];
+                        setAirData(prev => {
+                            // Only update if it's actually newer than what we have
+                            if (prev && new Date(latest.timestamp).getTime() <= lastAirTime) return prev;
+                            
+                            const currentChart = prev?.chartData || { labels: [], pm25: [], pm10: [], co2: [], tvoc: [], hcho: [], temp: [], humidity: [] };
+                            const timeLabel = new Date(latest.timestamp).toLocaleTimeString('en-US', { hour12: false, hour: '2-digit', minute: '2-digit' });
+                            
+                            setLastAirTime(new Date(latest.timestamp).getTime());
+                            
+                            return {
+                                ...latest,
+                                chartData: {
+                                    ...currentChart,
+                                    labels: [...currentChart.labels, timeLabel].slice(-100),
+                                    pm25: [...currentChart.pm25, latest.pm25].slice(-100),
+                                    pm10: [...currentChart.pm10, latest.pm10].slice(-100),
+                                    co2: [...currentChart.co2, latest.co2].slice(-100),
+                                    tvoc: [...currentChart.tvoc, latest.tvoc].slice(-100),
+                                    hcho: [...currentChart.hcho, latest.hcho].slice(-100),
+                                    temp: [...currentChart.temp, latest.temp].slice(-100),
+                                    humidity: [...currentChart.humidity, latest.humidity].slice(-100)
+                                }
+                            };
+                        });
+                    }
+                }
+            } catch (err) {
+                console.warn("Live data poll failed", err);
+            }
+        };
+
+        const interval = setInterval(fetchLatestData, 5000); // 5s fallback
+        return () => clearInterval(interval);
+    }, [lastAirTime, demoMode]);
+
+    const handleDeleteDevice = async (deviceId: string, e: React.MouseEvent) => {
+        e.stopPropagation(); // Prevent card click
+        if (demoMode) {
+            setMyDevices(prev => prev.filter(d => d.device_id !== deviceId));
+            return;
+        }
+        if (!confirm(`Are you sure you want to delete device ${deviceId}? This action cannot be undone.`)) return;
+
+        try {
+            const res = await fetch(getApiUrl(`/api/devices/${deviceId}`), {
+                method: 'DELETE',
+                headers: { "Authorization": `Bearer ${token}` }
+            });
+            if (res.ok) {
+                // Optimistic UI Update: Remove immediately
+                setMyDevices(prev => prev.filter(d => d.device_id !== deviceId));
+                // Optional: Background re-fetch to be safe
+                fetchDevices();
+            } else {
+                alert("Failed to delete device");
+            }
+        } catch (err) {
+            console.error(err);
+        }
+    }
+
+    // 4. Update State from WebSocket
+    useEffect(() => {
+        if (wsData && wsData.type === 'aqi') {
+            // AQI data is ALWAYS live as requested
+            setAirData(prev => {
+                const currentChart = prev?.chartData || { labels: [], pm25: [], pm10: [], co2: [], tvoc: [], hcho: [], temp: [], humidity: [] };
+                const timeLabel = new Date().toLocaleTimeString('en-US', { hour12: false, hour: '2-digit', minute: '2-digit' });
+                const newLabels = [...currentChart.labels, timeLabel].slice(-100);
+
+                setLastAirTime(Date.now()); // Update last seen for Air
+
+                return {
+                    pm25: wsData.data.pm25,
+                    pm10: wsData.data.pm10,
+                    co2: wsData.data.co2,
+                    tvoc: wsData.data.tvoc,
+                    hcho: wsData.data.hcho,
+                    temp: wsData.data.temp,
+                    humidity: wsData.data.humidity,
+                    chartData: {
+                        labels: newLabels,
+                        pm25: [...currentChart.pm25, wsData.data.pm25].slice(-100),
+                        pm10: [...currentChart.pm10, wsData.data.pm10].slice(-100),
+                        co2: [...currentChart.co2, wsData.data.co2].slice(-100),
+                        tvoc: [...currentChart.tvoc, wsData.data.tvoc].slice(-100),
+                        hcho: [...currentChart.hcho, wsData.data.hcho].slice(-100),
+                        temp: [...currentChart.temp, wsData.data.temp].slice(-100),
+                        humidity: [...currentChart.humidity, wsData.data.humidity].slice(-100)
+                    }
+                };
+            });
+        } else if (wsData && (wsData.type === 'water' || wsData.type === 'water_sensor')) {
+            setWaterData(prev => {
+                const incoming = wsData.data;
+                const hasTankData = 'level' in incoming;
+                // We check for either 'irms' or the explicit 'status' field sent by the pump monitor
+                const hasPumpData = 'irms' in incoming || 'status' in incoming;
+
+                const currentChart = prev?.chartData || { labels: [], level: [], ph: [], tds: [] };
+
+                let newLabels = currentChart.labels;
+                let newLevelArr = currentChart.level;
+                let newPhArr = currentChart.ph;
+                let newTdsArr = currentChart.tds;
+
+                // Only append to the chart history if this was a water tank reading
+                if (hasTankData) {
+                    const timeLabel = new Date().toLocaleTimeString('en-US', { hour12: false, hour: '2-digit', minute: '2-digit' });
+                    newLabels = [...currentChart.labels, timeLabel].slice(-100);
+                    newLevelArr = [...currentChart.level, incoming.level].slice(-100);
+                    newPhArr = [...currentChart.ph, incoming.ph ?? prev?.ph ?? 0].slice(-100);
+                    newTdsArr = [...currentChart.tds, incoming.tds ?? prev?.tds ?? 0].slice(-100);
+
+                    // Offline heartbeat update ONLY if it's a valid tank reading
+                    const isZeroWater = incoming.level === 0 && incoming.ph === 0 && incoming.tds === 0;
+                    if (!isZeroWater) {
+                        setLastWaterTime(Date.now());
+                    }
+                }
+
+                // If it's a pump reading, update the heartbeat regardless
+                if (hasPumpData) {
+                    setLastWaterTime(Date.now());
+                }
+
+                // Derive pump/water status band for gauges
+                let derivedStatus: string | null = waterStatus; // keep old status by default
+
+                if (hasPumpData) {
+                    // Pump monitor sends exact status string
+                    if (incoming.status && typeof incoming.status === "string") {
+                        derivedStatus = (incoming as any).status.toUpperCase();
+                    } else {
+                        // Fallback logic if needed
+                        const irms = incoming.irms ?? 0;
+                        if (irms < 2) derivedStatus = "OFF";
+                        else if (irms < 4) derivedStatus = "LOW";
+                        else if (irms < 7) derivedStatus = "MID";
+                        else if (irms < 12) derivedStatus = "HIGH";
+                        else derivedStatus = "CRITICAL";
+                    }
+                } else if (!prev?.pump_status || prev.pump_status === 'N/A') {
+                    // Fallback to deriving from level ONLY if no pump data exists yet
+                    const level = incoming.level ?? prev?.level ?? 0;
+                    if (level < 2) derivedStatus = "OFF";
+                    else if (level < 4) derivedStatus = "LOW";
+                    else if (level < 7) derivedStatus = "MID";
+                    else if (level < 12) derivedStatus = "HIGH";
+                    else derivedStatus = "CRITICAL";
+                }
+
+                setWaterStatus(derivedStatus);
+
+                return {
+                    level: hasTankData ? incoming.level : (prev?.level ?? 0),
+                    ph: hasTankData ? (incoming.ph ?? prev?.ph ?? 0) : (prev?.ph ?? 0),
+                    tds: hasTankData ? (incoming.tds ?? prev?.tds ?? 0) : (prev?.tds ?? 0),
+                    irms: hasPumpData ? (incoming.irms ?? prev?.irms ?? 0) : (prev?.irms ?? 0),
+                    pump_status: hasPumpData ? (derivedStatus ?? 'N/A') : (prev?.pump_status ?? 'N/A'),
+                    chartData: {
+                        labels: newLabels,
+                        level: newLevelArr,
+                        ph: newPhArr,
+                        tds: newTdsArr
+                    }
+                }
+            });
+        }
+    }, [wsData, demoMode]);
+
+    // 5. DEMO MODE: generate realistic random data so UI is functional without backend
+    useEffect(() => {
+        if (!demoMode) return;
+
+        // Seed locations/devices once
+        const demoLocs = [
+            { location_id: "BLR-01", name: "BLR-01", latitude: 12.9716, longitude: 77.5946, online: true, last_seen: new Date().toISOString() },
+            { location_id: "BLR-02", name: "BLR-02", latitude: 12.9352, longitude: 77.6245, online: true, last_seen: new Date().toISOString() },
+            { location_id: "BLR-03", name: "BLR-03", latitude: 13.0358, longitude: 77.5970, online: true, last_seen: new Date().toISOString() },
+        ];
+
+        setCapabilities({ has_aqi: true, has_water: true });
+        setIsSystemOnline(true);
+
+        setLocationsStatus(() => {
+            const m: Record<string, any> = {};
+            for (const l of demoLocs) m[l.location_id] = l;
+            return m;
+        });
+
+        setMyDevices([
+            { device_id: "AQI-CAM-01", type: "aqi_camera", status: "ONLINE", location_id: "BLR-01", location_name: "BLR-01", last_seen: new Date().toISOString() },
+            { device_id: "AIR-SENS-02", type: "aqi", status: "ONLINE", location_id: "BLR-02", location_name: "BLR-02", last_seen: new Date().toISOString() },
+            { device_id: "WATER-01", type: "water_sensor", status: "ONLINE", location_id: "BLR-01", location_name: "BLR-01", last_seen: new Date().toISOString() },
+            { device_id: "PUMP-01", type: "pump_monitor", status: "ONLINE", location_id: "BLR-03", location_name: "BLR-03", last_seen: new Date().toISOString() },
+        ]);
+
+        if (!currentLocation) {
+            setCurrentLocation("BLR-01");
+        }
+
+        // Initialize baseline values if missing
+        setAirData(prev => prev ?? ({
+            pm25: rand(8, 25),
+            pm10: rand(15, 45),
+            co2: rand(400, 650),
+            tvoc: rand(0.05, 0.15),
+            hcho: rand(0.01, 0.05),
+            temp: rand(22, 28),
+            humidity: rand(45, 65),
+            chartData: { labels: [], pm25: [], pm10: [], co2: [], tvoc: [], hcho: [], temp: [], humidity: [] }
+        }));
+
+        setWaterData(prev => prev ?? ({
+            level: rand(2, 12),
+            ph: rand(6.8, 8.2),
+            tds: rand(1, 9),
+            irms: rand(0.5, 9),
+            pump_status: "MID",
+            chartData: { labels: [], level: [], ph: [], tds: [] }
+        }));
+
+        const tick = () => {
+            if (!isSystemOnline) return;
+            const label = timeLabelNow();
+
+            setAirData(prev => {
+                const p = prev ?? ({
+                    pm25: 12, pm10: 25, co2: 450, tvoc: 0.1, hcho: 0.02, temp: 24, humidity: 55,
+                    chartData: { labels: [], pm25: [], pm10: [], co2: [], tvoc: [], hcho: [], temp: [], humidity: [] }
+                });
+
+                const spike = Math.random() < 0.08;
+                const pm25 = clamp(nextRandomWalk(p.pm25, spike ? 10 : 3, 0, 150), 0, 150);
+                const pm10 = clamp(nextRandomWalk(p.pm10, spike ? 20 : 6, 0, 250), 0, 250);
+                const co2 = clamp(nextRandomWalk(p.co2, spike ? 150 : 40, 400, 3000), 400, 3000);
+                const tvoc = clamp(nextRandomWalk(p.tvoc, 0.02, 0, 2), 0, 2);
+                const hcho = clamp(nextRandomWalk(p.hcho, 0.01, 0, 0.5), 0, 0.5);
+                const temp = clamp(nextRandomWalk(p.temp, 0.2, 10, 45), 10, 45);
+                const humidity = clamp(nextRandomWalk(p.humidity, 1, 10, 95), 10, 95);
+
+                const c = p.chartData ?? { labels: [], pm25: [], pm10: [], co2: [], tvoc: [], hcho: [], temp: [], humidity: [] };
+                const newLabels = [...c.labels, label].slice(-100);
+
+                setLastAirTime(Date.now());
+
+                return {
+                    pm25, pm10, co2, tvoc, hcho, temp, humidity,
+                    chartData: {
+                        labels: newLabels,
+                        pm25: [...c.pm25, pm25].slice(-100),
+                        pm10: [...c.pm10, pm10].slice(-100),
+                        co2: [...c.co2, co2].slice(-100),
+                        tvoc: [...c.tvoc, tvoc].slice(-100),
+                        hcho: [...c.hcho, hcho].slice(-100),
+                        temp: [...c.temp, temp].slice(-100),
+                        humidity: [...c.humidity, humidity].slice(-100),
+                    }
+                };
+            });
+
+            setWaterData(prev => {
+                const p = prev ?? ({
+                    level: 6.5, ph: 7.4, tds: 8, irms: 3.2, pump_status: "MID",
+                    chartData: { labels: [], level: [], ph: [], tds: [] }
+                });
+
+                // USE LINKED SIMULATION: Level reacts to motor status
+                const level = calculateNextWaterLevel(p.level, isMotorOn, {
+                    extractionRate: 0.15, // Faster drop when motor is on
+                    rechargeRate: 0.05,   // Slower recharge when off
+                });
+
+                const ph = clamp(nextRandomWalk(p.ph, 0.06, 6.2, 8.8), 6.2, 8.8);
+                const tds = clamp(nextRandomWalk(p.tds, 25, 50, 1800), 50, 1800);
+
+                // Pump current follows motor state
+                let irms = 0;
+                let pump_status = "OFF";
+
+                if (isMotorOn) {
+                    const baseIrms = level < 2 ? rand(9.5, 12.5) : level < 4 ? rand(7.0, 9.5) : rand(4.5, 7.5);
+                    irms = clamp(nextRandomWalk(baseIrms, 0.4, 0.1, 15), 0.1, 15);
+                    
+                    if (irms < 4) pump_status = "LOW";
+                    else if (irms < 7) pump_status = "MID";
+                    else if (irms < 12) pump_status = "HIGH";
+                    else pump_status = "CRITICAL";
+                }
+
+                setWaterStatus(pump_status);
+                setLastWaterTime(Date.now());
+
+                const c = p.chartData ?? { labels: [], level: [], ph: [], tds: [] };
+                const newLabels = [...c.labels, label].slice(-100);
+
+                return {
+                    level, ph, tds, irms, pump_status,
+                    chartData: {
+                        labels: newLabels,
+                        level: [...c.level, level].slice(-100),
+                        ph: [...c.ph, ph].slice(-100),
+                        tds: [...c.tds, tds].slice(-100),
+                    }
+                };
+            });
+
+            // Update location last_seen so map popups look alive
+            setLocationsStatus(prev => {
+                const updated: Record<string, any> = { ...prev };
+                for (const [k, v] of Object.entries(updated)) {
+                    updated[k] = { ...v, online: true, last_seen: new Date().toISOString() };
+                }
+                return updated;
+            });
+        };
+
+        // Runs every 8 seconds for a dynamic HR Demo (previously 2 mins)
+        const interval = setInterval(tick, 8000);
+        // Prime ~10 points so charts have an initial trend
+        for (let i = 0; i < 10; i++) tick();
+
+        return () => clearInterval(interval);
+    }, [demoMode, currentLocation, isSystemOnline, isMotorOn]);
+
+    const handleMotorToggle = (index: number) => {
+        const borewellId = borewells[index].id;
+        const currentStatus = borewells[index].isMotorOn ? 'OFF' : 'ON';
+
+        // Update UI immediately (Optimistic)
+        setBorewells(prev => prev.map((bw, i) => 
+            i === index ? { ...bw, isMotorOn: !bw.isMotorOn } : bw
+        ));
+
+        // Sync with Real Backend if not in demo
+        if (!demoMode) {
+            fetch(getApiUrl("/api/control"), {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ id: borewellId, command: currentStatus })
+            }).catch(err => console.error("Control Sync Failed:", err));
+        }
+    };
+
+    // --- REAL BACKEND INITIAL SYNC ---
+    useEffect(() => {
+        if (demoMode) return;
+
+        // 1. Fetch current states
+        fetch(getApiUrl("/api/borewells"))
+            .then(res => res.json())
+            .then(data => {
+                if (Array.isArray(data)) {
+                    setBorewells(data.map(bw => ({
+                        id: bw.id,
+                        isMotorOn: bw.is_motor_on === 1,
+                        runTime: bw.run_time_total
+                    })));
+                    
+                    // Update current water data with latest values from DB
+                    const active = data[activeBorewellIndex];
+                    if (active) {
+                        setWaterData(prev => ({
+                            ...prev,
+                            level: active.water_level,
+                            ph: prev?.ph || 7.2,
+                            tds: prev?.tds || 250,
+                            irms: active.current,
+                            pump_status: active.is_motor_on ? "MID" : "OFF"
+                        } as any));
+                    }
+                }
+            });
+
+        // 2. Fetch History for Charts
+        const activeId = borewells[activeBorewellIndex].id;
+        fetch(getApiUrl(`/api/history/${activeId}`))
+            .then(res => res.json())
+            .then(history => {
+                if (Array.isArray(history)) {
+                    setWaterData(prev => {
+                        const labels = history.map(h => new Date(h.timestamp).toLocaleTimeString('en-US', { hour12: false, hour: '2-digit', minute: '2-digit' }));
+                        const levels = history.map(h => h.water_level);
+                        const phs = history.map(h => h.ph || 7.2);
+                        const tdss = history.map(h => h.tds || 250);
+                        
+                        return {
+                            ...prev,
+                            chartData: {
+                                labels: labels,
+                                level: levels,
+                                ph: phs,
+                                tds: tdss
+                            }
+                        } as any;
+                    });
+                }
+            });
+
+        fetch(getApiUrl(`/api/aqi/history`))
+            .then(res => res.json())
+            .then(history => {
+                if (Array.isArray(history)) {
+                    setAirData(prev => {
+                        const labels = history.map(h => new Date(h.timestamp).toLocaleTimeString('en-US', { hour12: false, hour: '2-digit', minute: '2-digit' }));
+                        const pm25s = history.map(h => h.pm25);
+                        const pm10s = history.map(h => h.pm10);
+                        const co2s = history.map(h => h.co2);
+                        const tvocs = history.map(h => h.tvoc);
+                        const hchos = history.map(h => h.hcho);
+                        const temps = history.map(h => h.temp);
+                        const hums = history.map(h => h.humidity);
+                        
+                        return {
+                            ...prev,
+                            pm25: history[history.length-1]?.pm25 ?? prev?.pm25 ?? 0,
+                            pm10: history[history.length-1]?.pm10 ?? prev?.pm10 ?? 0,
+                            co2: history[history.length-1]?.co2 ?? prev?.co2 ?? 400,
+                            tvoc: history[history.length-1]?.tvoc ?? prev?.tvoc ?? 0,
+                            hcho: history[history.length-1]?.hcho ?? prev?.hcho ?? 0,
+                            temp: history[history.length-1]?.temp ?? prev?.temp ?? 0,
+                            humidity: history[history.length-1]?.humidity ?? prev?.humidity ?? 0,
+                            chartData: {
+                                labels: labels,
+                                pm25: pm25s,
+                                pm10: pm10s,
+                                co2: co2s,
+                                tvoc: tvocs,
+                                hcho: hchos,
+                                temp: temps,
+                                humidity: hums
+                            }
+                        } as any;
+                    });
+                }
+            });
+    }, [demoMode, activeBorewellIndex]);
+
+    // Visual Effects... (Existing)
+    const [stars, setStars] = useState<Array<{ left: string; top: string; delay: string; duration: string }>>([])
+    useEffect(() => {
+        if (waterData) setMaxWaterLevel((prev) => Math.max(prev, waterData.level))
+    }, [waterData])
+
+    useEffect(() => {
+        const handleMouseMove = (e: MouseEvent) => {
+            setMousePosition({ x: (e.clientX / window.innerWidth - 0.5) * 20, y: (e.clientY / window.innerHeight - 0.5) * 20 })
+        }
+        window.addEventListener("mousemove", handleMouseMove)
+        return () => window.removeEventListener("mousemove", handleMouseMove)
+    }, [])
+
+    useEffect(() => {
+        setStars(Array.from({ length: 100 }).map(() => ({
+            left: `${Math.random() * 100}%`,
+            top: `${Math.random() * 100}%`,
+            delay: `${Math.random() * 3}s`,
+            duration: `${2 + Math.random() * 2}s`,
+        })))
+    }, [])
+
+    const safeAirData = airData || {
+        pm25: 0, pm10: 0, co2: 400, tvoc: 0, hcho: 0, temp: 0, humidity: 0,
+        chartData: { labels: [], pm25: [], pm10: [], co2: [], tvoc: [], hcho: [], temp: [], humidity: [] }
+    };
+    const safeWaterData = waterData || { level: 0, ph: 0, tds: 0, irms: 0, pump_status: 'N/A', chartData: { labels: [], level: [], ph: [], tds: [] } };
+    const maxPm25Recorded = airData ? Math.max(airData.pm25, ...(airData.chartData?.pm25 || [])) : 0;
+    const maxWaterLevelRecorded = waterData ? Math.max(waterData.level, ...(waterData.chartData?.level || [])) : 0;
+
+    const historicalReadings = useMemo(
+        () =>
+            buildHistoricalReadingsSeries(
+                readingsPeriod,
+                safeWaterData.level,
+                safeAirData.pm25
+            ),
+        [readingsPeriod, safeWaterData.level, safeAirData.pm25]
+    )
+
+    const yearlyWaterComparison = useMemo(
+        () => buildYearlyMonthlyWaterLevelComparison(safeWaterData.level),
+        [safeWaterData.level]
+    )
+
+    // --- INTERACTION HANDLERS ---
+    const handleTileClick = (metric: string | null) => {
+        setSelectedPollutant(prev => prev === metric ? null : metric);
+    }
+
+    const handleWaterTileClick = (metric: string | null) => {
+        setSelectedWaterMetric(prev => prev === metric ? null : metric);
+    }
+
+    // Fullscreen Modal Data Mapping
+    const getModalData = () => {
+        if (modalConfig.type === 'aqi' && safeAirData.chartData.labels.length > 0) {
+            return safeAirData.chartData.labels.map((l, i) => ({
+                time: l,
+                pm25: safeAirData.chartData.pm25[i],
+                pm10: safeAirData.chartData.pm10[i],
+                co2: safeAirData.chartData.co2[i],
+                tvoc: safeAirData.chartData.tvoc[i],
+                hcho: safeAirData.chartData.hcho?.[i] || 0,
+                temp: safeAirData.chartData.temp?.[i] || 0,
+                humidity: safeAirData.chartData.humidity?.[i] || 0,
+            }));
+        }
+        if (modalConfig.type === 'water' && safeWaterData.chartData.labels.length > 0) {
+            return safeWaterData.chartData.labels.map((l, i) => ({
+                time: l,
+                level: safeWaterData.chartData.level[i],
+                ph: safeWaterData.chartData.ph[i],
+                tds: safeWaterData.chartData.tds[i],
+            }));
+        }
+        return [];
+    }
+
+    if (!mounted || isInitialLoading) return <LoadingScreen />;
+
+    return (
+        <div className={`relative min-h-screen overflow-hidden transition-all duration-1000 ${isSystemOnline ? 'bg-[#050511]' : 'bg-[radial-gradient(circle_at_center,_#0b2a44,_#061a2b)]'}`}>
+            {/* Offline Banner Removed as requested */}
+
+            <SidebarNavigation
+                isOpen={isSidebarOpen}
+                onToggle={() => setIsSidebarOpen((v) => !v)}
+                activeView={activeView}
+                onNavigate={setActiveView}
+            />
+
+            <div className="transition-all duration-700">
+
+                {/* Animated Background */}
+                <div className="fixed inset-0 z-0">
+                    <div className="absolute inset-0 bg-gradient-to-br from-[#0a0520] via-[#050511] to-[#000208]" />
+                    {isSystemOnline && (
+                        <>
+                            <div className="hidden lg:block absolute h-[600px] w-[600px] rounded-full bg-gradient-to-br from-emerald-600/20 via-cyan-600/10 to-transparent blur-[100px]" style={{ left: `calc(15% + ${mousePosition.x}px)`, top: `calc(15% + ${mousePosition.y}px)`, transition: "left 0.3s ease-out, top 0.3s ease-out" }} />
+                            <div className="hidden lg:block animation-delay-2000 absolute h-[500px] w-[500px] rounded-full bg-gradient-to-br from-purple-600/15 via-indigo-600/10 to-transparent blur-[100px]" style={{ right: `calc(10% + ${-mousePosition.x}px)`, top: `calc(20% + ${-mousePosition.y}px)`, transition: "right 0.3s ease-out, top 0.3s ease-out" }} />
+                        </>
+                    )}
+                    <div className="absolute inset-0 opacity-70">
+                        {stars.map((star, i) => (
+                            <div key={i} className={`absolute h-[2px] w-[2px] rounded-full bg-white ${isSystemOnline ? 'lg:animate-twinkle' : ''}`} style={{ left: star.left, top: star.top, animationDelay: star.delay, animationDuration: star.duration }} />
+                        ))}
+                    </div>
+                </div>
+
+                {/* Content */}
+                <div className="relative z-10 flex min-h-screen lg:h-screen flex-col lg:overflow-hidden">
+                    {/* Header - Compact */}
+                    <header className="flex items-center justify-between border-b border-white/5 px-4 py-2 backdrop-blur-sm">
+                        <div className="flex items-center gap-2">
+                            <button
+                                onClick={() => setIsSidebarOpen((v) => !v)}
+                                className="relative flex h-10 w-10 items-center justify-center rounded-xl border border-transparent bg-transparent transition-all duration-300 hover:bg-white/10"
+                                aria-label="Toggle menu"
+                            >
+                                <div className="relative h-5 w-5">
+                                    <span
+                                        className={`absolute left-0 top-0 h-0.5 w-5 rounded-full bg-emerald-400 transition-all duration-300 ${isSidebarOpen ? "top-2.5 rotate-45" : ""
+                                            }`}
+                                    />
+                                    <span
+                                        className={`absolute left-0 top-2 h-0.5 w-5 rounded-full bg-emerald-400 transition-all duration-300 ${isSidebarOpen ? "opacity-0" : ""
+                                            }`}
+                                    />
+                                    <span
+                                        className={`absolute left-0 top-4 h-0.5 w-5 rounded-full bg-emerald-400 transition-all duration-300 ${isSidebarOpen ? "top-2.5 -rotate-45" : ""
+                                            }`}
+                                    />
+                                </div>
+                            </button>
+                            <div>
+                                <img src="/logo.png" alt="Planet Insights" className="h-6 object-contain" />
+                            </div>
+                            {currentLocation && (
+                                <div className="ml-2 px-2 py-0.5 rounded-full bg-white/10 text-[10px] font-mono text-emerald-400 border border-emerald-500/20">
+                                    LOC: {currentLocation}
+                                </div>
+                            )}
+                        </div>
+
+                        <div className="flex items-center gap-3">
+                            <div className={`flex items-center gap-1.5 px-2 py-1 rounded-full text-[10px] font-bold uppercase tracking-wider border ${locationStatus === 'ONLINE'
+                                ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20'
+                                : 'bg-red-500/10 text-red-400 border-red-500/20'
+                                }`}>
+                                {locationStatus === 'ONLINE' ? <Wifi className="h-3 w-3" /> : <WifiOff className="h-3 w-3" />}
+                                {locationStatus}
+                            </div>
+                            {lastMessageTime && (
+                                <span className="text-[10px] text-slate-500 font-mono">
+                                    {new Date(lastMessageTime).toLocaleTimeString()}
+                                </span>
+                            )}
+                        </div>
+                    </header>
+
+                    {/* View Switcher - Standard window scrolling on mobile for stability */}
+                    <main className="flex-1 overflow-x-hidden overflow-y-auto lg:overflow-hidden p-2">
+                        {activeView === "dashboard" ? (
+                            <div className="flex flex-col lg:grid lg:h-full lg:grid-cols-[28%_40%_32%] lg:grid-rows-[35%_35%_30%] gap-4 lg:gap-2">
+
+                                {/* Top Left: Borewell Monitor */}
+                                <div className="lg:col-start-1 lg:row-start-1 min-h-[250px] lg:min-h-0">
+                                    <BorewellMonitorCard
+                                        activeBorewellIndex={activeBorewellIndex}
+                                        onBorewellChange={setActiveBorewellIndex}
+                                        isMotorOn={isMotorOn}
+                                        onMotorToggle={() => handleMotorToggle(activeBorewellIndex)}
+                                        data={{
+                                            flowRate: isMotorOn ? rand(35 + activeBorewellIndex * 5, 55 + activeBorewellIndex * 5).toFixed(1) : 0,
+                                            efficiency: isMotorOn ? rand(68, 85).toFixed(0) : 0,
+                                            voltage: rand(228, 242).toFixed(0),
+                                            current: (activeBorewellIndex === 0 ? (waterData?.irms || 8.4) : rand(4, 9)).toFixed(1),
+                                            runTime: (motorRunTime / 3600).toFixed(2),
+                                            liters: isMotorOn ? (800 + activeBorewellIndex * 100).toString() : "0"
+                                        }}
+                                    />
+                                </div>
+
+                                <div 
+                                    className="lg:col-start-2 lg:row-start-1 overflow-hidden min-h-[350px] lg:min-h-0 transition-all duration-500"
+                                    key={`water-analysis-${activeBorewellIndex}`}
+                                    style={{ animation: 'fadeInSlide 0.5s ease-out' }}
+                                >
+                                    <WaterAnalysisSplit
+                                        waterData={{
+                                            ...safeWaterData,
+                                            level: borewells[activeBorewellIndex].isMotorOn ? rand(4.2, 5.8) : rand(1.2, 2.5),
+                                            irms: borewells[activeBorewellIndex].isMotorOn ? rand(7.8, 9.2) : 0,
+                                            tds: rand(210 + activeBorewellIndex * 5, 240 + activeBorewellIndex * 5),
+                                            ph: rand(6.8, 7.4)
+                                        }}
+                                        maxWaterLevel={10}
+                                        waterStatus={borewells[activeBorewellIndex].isMotorOn ? "ACTIVE" : "STANDBY"}
+                                    />
+                                </div>
+
+                                {/* Top Right: Global Comparative Globe */}
+                                <div className="lg:col-start-3 lg:row-start-1 overflow-hidden rounded-xl border border-white/5 bg-slate-900/20 backdrop-blur-md min-h-[350px] lg:min-h-0">
+                                    <GlobalComparativeGlobe
+                                        userAQI={calculateAQI({
+                                            pm25: safeAirData.pm25,
+                                            pm10: safeAirData.pm10
+                                        }).aqi}
+                                        userLat={locationsStatus[currentLocation]?.latitude ?? 12.9716}
+                                        userLng={locationsStatus[currentLocation]?.longitude ?? 77.5946}
+                                        locationName={currentLocation || "BLR-01"}
+                                    />
+                                </div>
+
+                                {/* ═══ ROW 2: THE TRENDS ═══ */}
+                                {/* Middle Left: Borewell System Health Index (Radar) */}
+                                <div className="lg:col-start-1 lg:row-start-2 overflow-hidden min-h-[300px] lg:min-h-0">
+                                    <BorewellHealthIndex leakStatus={isMotorOn ? "Nominal" : "Standby"} />
+                                </div>
+
+                                <div className="lg:col-start-2 lg:row-start-2 overflow-hidden min-h-[350px] lg:min-h-0">
+                                    <WaterQualityCard
+                                        data={{
+                                            ...safeWaterData,
+                                            chartData: {
+                                                labels: Array(24).fill(0).map((_, i) => `${i}:00`),
+                                                level: Array(24).fill(0).map(() => rand(40, 50)),
+                                                ph: Array(24).fill(0).map(() => rand(6.8, 7.5)),
+                                                tds: Array(24).fill(0).map(() => rand(200, 230))
+                                            }
+                                        }}
+                                        activeMetric={selectedWaterMetric}
+                                        onMetricSelect={handleWaterTileClick}
+                                        onExpand={() => setModalConfig({ isOpen: true, type: 'water' })}
+                                        isOffline={false}
+                                        mode="line-only"
+                                        timeRange={timeRange}
+                                        onTimeRangeChange={setTimeRange}
+                                        isMotorOn={isMotorOn}
+                                    />
+                                </div>
+
+                                {/* Middle Right: Yearly Water Level Comparison (Fixed) */}
+                                <div className="lg:col-start-3 lg:row-start-2 overflow-hidden min-h-[300px] lg:min-h-0">
+                                    <RecentReadingsTable
+                                        waterLevels={historicalReadings.waterLevels}
+                                        aqiValues={historicalReadings.aqiValues}
+                                        labels={historicalReadings.labels}
+                                        period={readingsPeriod}
+                                        onPeriodChange={setReadingsPeriod}
+                                        onExpand={() => setReadingsModalOpen(true)}
+                                        yearlyLabels={yearlyWaterComparison.labels}
+                                        yearlyWaterLevels={yearlyWaterComparison.waterLevels}
+                                    />
+                                </div>
+
+                                {/* Bottom Left: AQI Pollutant Hub (Compact/Expand) */}
+                                <div className="lg:col-start-1 lg:row-start-3 h-full flex flex-col overflow-hidden min-h-[300px] lg:min-h-0">
+                                    <AQIPollutantHub
+                                        data={safeAirData}
+                                        activeMetric={selectedPollutant}
+                                        onMetricSelect={handleTileClick}
+                                        isOffline={false}
+                                        mode="compact"
+                                        timeRange={timeRange}
+                                        onTimeRangeChange={setTimeRange}
+                                    />
+                                </div>
+
+                                {/* Bottom Middle: Sensor Status */}
+                                <div className="lg:col-start-2 lg:row-start-3 h-full flex flex-col overflow-hidden min-h-[250px] lg:min-h-0">
+                                    <div className="relative flex h-full flex-col rounded-xl bg-slate-900/40 backdrop-blur-md lg:backdrop-blur-xl border border-white/5 p-3 overflow-hidden">
+                                        <h3 className="mb-2 text-[10px] font-bold uppercase tracking-[0.15em] text-slate-400 border-b border-white/5 pb-1 shrink-0">Sensor Status</h3>
+                                        <div className="flex flex-col gap-1.5 flex-1 min-h-0 overflow-y-auto scrollbar-thin scrollbar-thumb-white/10">
+                                            {(myDevices.length > 0 ? myDevices : [
+                                                { device_id: "BW-GW-01", type: "GATEWAY", status: "ONLINE" },
+                                                { device_id: "BW-NODE-01", type: "SENSOR", status: "ONLINE" },
+                                                { device_id: "AQI-NODE-01", type: "SENSOR", status: "ONLINE" },
+                                                { device_id: "LORA-HUB", type: "BASE", status: "ONLINE" }
+                                            ]).map((dev) => (
+                                                <div
+                                                    key={dev.device_id}
+                                                    className="w-full flex cursor-pointer items-center justify-between rounded-lg border border-white/5 bg-white/[0.03] px-3 py-2 transition-all hover:bg-white/[0.06] group"
+                                                    onClick={() => dev.location_id && handleLocationSelect(dev.location_id)}
+                                                >
+                                                    <div className="flex items-center gap-3 min-w-0">
+                                                        <div className="h-7 w-7 rounded-md bg-emerald-500/10 flex items-center justify-center border border-emerald-500/20 shrink-0">
+                                                            <Cpu className="h-3.5 w-3.5 text-emerald-400" />
+                                                        </div>
+                                                        <div className="min-w-0">
+                                                            <div className="text-[11px] font-bold text-white truncate">{dev.device_id}</div>
+                                                            <div className="text-[8px] uppercase text-slate-500 truncate">{dev.type}</div>
+                                                        </div>
+                                                    </div>
+                                                    <div className={`flex items-center gap-1.5 px-2.5 py-0.5 rounded-full border text-[8px] font-bold uppercase shrink-0 ${dev.status?.toUpperCase() === 'ONLINE'
+                                                        ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/30'
+                                                        : 'bg-red-500/10 text-red-400 border-red-500/30'
+                                                        }`}>
+                                                        <div className={`h-1.5 w-1.5 rounded-full ${dev.status?.toUpperCase() === 'ONLINE' ? 'bg-emerald-500' : 'bg-red-500'}`} />
+                                                        {dev.status?.toUpperCase() === 'ONLINE' ? 'ONLINE' : 'OFFLINE'}
+                                                    </div>
+                                                </div>
+                                            ))}
+                                        </div>
+                                    </div>
+                                </div>
+
+                                {/* Bottom Right: AI Summarizer (Fixed) */}
+                                <div className="lg:col-start-3 lg:row-start-3 h-full flex flex-col overflow-hidden min-h-[250px] lg:min-h-0">
+                                    <AiSummarizerCard />
+                                </div>
+
+                            </div>
+                        ) : (
+                            /* DEVICES VIEW */
+                            <div className="max-w-5xl mx-auto">
+                                <h2 className="text-2xl font-bold text-white mb-6">My Hardware Devices</h2>
+                                <div className="grid gap-4">
+                                    {myDevices.map((dev) => (
+                                        <div
+                                            key={dev.device_id}
+                                            onClick={() => dev.location_id && handleLocationSelect(dev.location_id)}
+                                            className="bg-white/5 border border-white/10 rounded-xl p-6 flex items-center justify-between hover:bg-white/10 transition-colors cursor-pointer group"
+                                        >
+                                            <div className="flex items-center gap-4">
+                                                <div className="h-12 w-12 rounded-lg bg-emerald-500/20 flex items-center justify-center text-emerald-400 group-hover:bg-emerald-500/30 transition-colors">
+                                                    <Cpu className="h-6 w-6" />
+                                                </div>
+                                                <div>
+                                                    <div className="text-lg font-bold text-white">{dev.device_id}</div>
+                                                    <div className="text-sm text-slate-400 uppercase tracking-widest">{dev.type}</div>
+                                                </div>
+                                            </div>
+
+                                            <div className="flex items-center gap-8">
+                                                <div className="flex items-center gap-2 text-slate-300">
+                                                    <MapPin className="h-4 w-4 text-blue-400" />
+                                                    {dev.location_name}
+                                                </div>
+                                                <div className="flex flex-col items-end gap-1">
+                                                    <div className={`px-3 py-1 rounded-full text-xs font-bold border ${dev.status?.toUpperCase() === 'ONLINE' ? 'bg-emerald-500/20 text-emerald-400 border-emerald-500/30' : 'bg-slate-500/20 text-slate-400 border-slate-500/30'}`}>
+                                                        {dev.status?.toUpperCase() === 'ONLINE' ? 'ONLINE' : 'OFFLINE'}
+                                                    </div>
+                                                    {dev.last_seen && (
+                                                        <div className="text-[10px] text-slate-500 font-mono">
+                                                            Seen: {new Date(dev.last_seen).toLocaleTimeString()}
+                                                        </div>
+                                                    )}
+                                                </div>
+                                                <button
+                                                    onClick={(e) => handleDeleteDevice(dev.device_id, e)}
+                                                    className="p-2 ml-4 rounded-full bg-red-500/10 text-red-400 hover:bg-red-500/20 hover:text-red-300 transition-colors"
+                                                    title="Remove Device"
+                                                >
+                                                    <Trash2 className="h-4 w-4" />
+                                                </button>
+                                            </div>
+                                        </div>
+                                    ))}
+                                    {myDevices.length === 0 && (
+                                        <div className="text-center py-20 bg-white/5 rounded-xl border border-dashed border-white/10">
+                                            <p className="text-slate-400">No devices registered. Run the registration script!</p>
+                                        </div>
+                                    )}
+                                </div>
+                            </div>
+                        )}
+                    </main>
+                </div>
+
+                {/* MODAL */}
+                <ChartModal
+                    isOpen={modalConfig.isOpen}
+                    onClose={() => setModalConfig({ ...modalConfig, isOpen: false })}
+                    chartType={modalConfig.type}
+                    data={getModalData()}
+                    selectedPollutant={selectedPollutant}
+                    onPollutantSelect={handleTileClick}
+                    selectedWaterMetric={selectedWaterMetric}
+                    onWaterMetricSelect={handleWaterTileClick}
+                    isMotorOn={isMotorOn}
+                />
+
+                <RecentReadingsExpandModal
+                    open={readingsModalOpen}
+                    onClose={() => setReadingsModalOpen(false)}
+                    waterLevels={historicalReadings.waterLevels}
+                    labels={historicalReadings.labels}
+                    period={readingsPeriod}
+                    onPeriodChange={setReadingsPeriod}
+                />
+                <style jsx global>{`
+                    @keyframes fadeInSlide {
+                        from { opacity: 0; transform: translateY(10px); }
+                        to { opacity: 1; transform: translateY(0); }
+                    }
+                    @keyframes slideIn {
+                        from { transform: translateX(10px); opacity: 0; }
+                        to { transform: translateX(0); opacity: 1; }
+                    }
+                `}</style>
+            </div>
+        </div>
+    )
+}
