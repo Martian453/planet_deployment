@@ -122,17 +122,7 @@ export function PrivateDashboard() {
         return () => clearInterval(interval);
     }, [demoMode]);
 
-    // --- AUTO-SWIPE LOGIC (Cycle Borewells every 6 seconds) ---
-    useEffect(() => {
-        // Only auto-swipe if we are not in a modal or actively interacting
-        const interval = setInterval(() => {
-            if (!modalConfig.isOpen) {
-                setActiveBorewellIndex(prev => (prev + 1) % 3);
-            }
-        }, 6000); // 6 seconds
 
-        return () => clearInterval(interval);
-    }, [modalConfig.isOpen]);
 
     const isMotorOn = borewells[activeBorewellIndex].isMotorOn;
     const motorRunTime = borewells[activeBorewellIndex].runTime;
@@ -957,17 +947,13 @@ export function PrivateDashboard() {
                                     />
                                 </div>
 
-                                <div 
-                                    className="lg:col-start-2 lg:row-start-1 overflow-hidden min-h-[350px] lg:min-h-0 transition-all duration-500"
-                                    key={`water-analysis-${activeBorewellIndex}`}
-                                    style={{ animation: 'fadeInSlide 0.5s ease-out' }}
-                                >
+                                <div className="lg:col-start-2 lg:row-start-1 overflow-hidden min-h-[350px] lg:min-h-0">
                                     <WaterAnalysisSplit
                                         waterData={{
                                             ...safeWaterData,
                                             level: borewells[activeBorewellIndex].isMotorOn ? rand(4.2, 5.8) : rand(1.2, 2.5),
                                             irms: borewells[activeBorewellIndex].isMotorOn ? rand(7.8, 9.2) : 0,
-                                            tds: rand(210 + activeBorewellIndex * 5, 240 + activeBorewellIndex * 5),
+                                            tds: rand(210, 240),
                                             ph: rand(6.8, 7.4)
                                         }}
                                         maxWaterLevel={10}
@@ -1165,16 +1151,6 @@ export function PrivateDashboard() {
                     period={readingsPeriod}
                     onPeriodChange={setReadingsPeriod}
                 />
-                <style jsx global>{`
-                    @keyframes fadeInSlide {
-                        from { opacity: 0; transform: translateY(10px); }
-                        to { opacity: 1; transform: translateY(0); }
-                    }
-                    @keyframes slideIn {
-                        from { transform: translateX(10px); opacity: 0; }
-                        to { transform: translateX(0); opacity: 1; }
-                    }
-                `}</style>
             </div>
         </div>
     )
