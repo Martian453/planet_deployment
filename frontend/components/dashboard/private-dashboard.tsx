@@ -927,7 +927,7 @@ export function PrivateDashboard() {
                     {/* View Switcher - Standard window scrolling on mobile for stability */}
                     <main className="flex-1 overflow-x-hidden overflow-y-auto lg:overflow-hidden p-2">
                         {activeView === "dashboard" ? (
-                            <div className="flex flex-col lg:grid lg:h-full lg:grid-cols-[28%_40%_32%] lg:grid-rows-[35%_35%_30%] gap-4 lg:gap-2">
+                            <div className="flex flex-col lg:grid lg:h-full lg:grid-cols-[36%_32%_32%] lg:grid-rows-[35%_35%_30%] gap-4 lg:gap-2">
 
                                 {/* Top Left: Borewell Monitor */}
                                 <div className="lg:col-start-1 lg:row-start-1 min-h-[250px] lg:min-h-0">
