@@ -107,8 +107,8 @@ export function WaterDonutChart({ waterData, transparent = false, sideBySide = f
                         <PieChart>
                             <Pie
                                 data={data}
-                                innerRadius={sideBySide ? 32 : 47}
-                                outerRadius={sideBySide ? 52 : 62}
+                                innerRadius={sideBySide ? 31 : 46}
+                                outerRadius={sideBySide ? 51 : 61}
                                 paddingAngle={4}
                                 dataKey="chartValue"
                                 onMouseEnter={onPieEnter}

@@ -68,7 +68,6 @@ export function PrivateDashboard() {
     const [isSidebarOpen, setIsSidebarOpen] = useState(false)
     const [maxWaterLevel, setMaxWaterLevel] = useState(0)
     const hasAutoSelected = useRef(false); // Track smart auto-selection
-    const [waterStatus, setWaterStatus] = useState<string | null>(null)
     const [loopIndex, setLoopIndex] = useState(0);
     const waterDataRef = require('react').useRef(null);
     // PRODUCTIZATION STATE
@@ -139,8 +138,8 @@ export function PrivateDashboard() {
     const isAirOffline = !isAirOnline;
     const isWaterOffline = !isWaterOnline;
 
-    const isMotorOn = !isWaterOffline && borewells[activeBorewellIndex].isMotorOn;
-    const motorRunTime = borewells[activeBorewellIndex].runTime;
+    const isMotorOn = !isWaterOffline && (borewells[activeBorewellIndex]?.isMotorOn || false);
+    const motorRunTime = borewells[activeBorewellIndex]?.runTime || 0;
 
     // Status Logic
     let locationStatus: "ONLINE" | "PARTIAL" | "OFFLINE" = "OFFLINE";
@@ -497,9 +496,8 @@ export function PrivateDashboard() {
                 if (hasPumpData) {
                     setLastWaterTime(Date.now());
                 }
-
                 // Derive pump/water status band for gauges
-                let derivedStatus: string | null = waterStatus; // keep old status by default
+                let derivedStatus: string | null = prev?.pump_status ?? null;
 
                 if (hasPumpData) {
                     if (incoming.status && typeof incoming.status === "string") {
@@ -520,8 +518,6 @@ export function PrivateDashboard() {
                     else if (level < 12) derivedStatus = "HIGH";
                     else derivedStatus = "CRITICAL";
                 }
-
-                setWaterStatus(derivedStatus);
 
                 return {
                     level: incomingLevel ?? (prev?.level ?? 4.5),
@@ -677,7 +673,6 @@ export function PrivateDashboard() {
                     else pump_status = "CRITICAL";
                 }
 
-                setWaterStatus(pump_status);
                 setLastWaterTime(Date.now());
 
                 const c = p.chartData ?? { labels: [], level: [], ph: [], tds: [] };
@@ -713,8 +708,9 @@ export function PrivateDashboard() {
     }, [demoMode, currentLocation, isSystemOnline, isMotorOn]);
 
     const handleMotorToggle = (index: number) => {
-        const borewellId = borewells[index].id;
-        const currentStatus = borewells[index].isMotorOn ? 'OFF' : 'ON';
+        const borewellId = borewells[index]?.id;
+        if (!borewellId) return;
+        const currentStatus = borewells[index]?.isMotorOn ? 'OFF' : 'ON';
 
         // Update UI immediately (Optimistic)
         setBorewells(prev => prev.map((bw, i) =>

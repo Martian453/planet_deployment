@@ -292,6 +292,33 @@ app.post('/api/aqi', (req, res) => {
   });
 });
 
+// 5. Locations & Status Management (Syncs with Frontend Polling)
+app.get('/api/locations', (req, res) => {
+  res.json([
+    { location_id: "BLR-01", name: "BLR-01", latitude: 12.9716, longitude: 77.5946, online: true, last_seen: new Date().toISOString() }
+  ]);
+});
+
+app.get('/api/locations/status', (req, res) => {
+  res.json([
+    { location_id: "BLR-01", name: "BLR-01", latitude: 12.9716, longitude: 77.5946, online: true, last_seen: new Date().toISOString() }
+  ]);
+});
+
+app.get('/api/location/:name/capabilities', (req, res) => {
+  res.json({ has_aqi: true, has_water: true });
+});
+
+// 6. Devices Listing
+app.get('/api/devices', (req, res) => {
+  res.json([
+    { device_id: "BW-GW-01", type: "GATEWAY", status: "ONLINE", location_id: "BLR-01", location_name: "BLR-01", last_seen: new Date().toISOString() },
+    { device_id: "BW-NODE-01", type: "SENSOR", status: "ONLINE", location_id: "BLR-01", location_name: "BLR-01", last_seen: new Date().toISOString() },
+    { device_id: "AQI-NODE-01", type: "SENSOR", status: "ONLINE", location_id: "BLR-01", location_name: "BLR-01", last_seen: new Date().toISOString() },
+    { device_id: "LORA-HUB", type: "BASE", status: "ONLINE", location_id: "BLR-01", location_name: "BLR-01", last_seen: new Date().toISOString() }
+  ]);
+});
+
 // --- WEBSOCKET LOGIC ---
 
 wss.on('connection', (ws, req) => {
