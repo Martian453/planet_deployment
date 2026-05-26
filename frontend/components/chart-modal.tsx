@@ -28,6 +28,8 @@ interface ChartModalProps {
     selectedWaterMetric: string | null
     onWaterMetricSelect: (metric: string | null) => void
     isMotorOn?: boolean
+    timeRange: TimeRange
+    onTimeRangeChange: (range: TimeRange) => void
 }
 
 const pollutantConfig: Record<string, { color: string; label: string }> = {
@@ -54,60 +56,11 @@ export function ChartModal({
     onPollutantSelect,
     selectedWaterMetric,
     onWaterMetricSelect,
-    isMotorOn = false
+    isMotorOn = false,
+    timeRange,
+    onTimeRangeChange
 }: ChartModalProps) {
-    const [timeRange, setTimeRange] = useState<TimeRange>("1h")
-
-    // SIMULATION LOGIC: Mirror the tile behavior for expanded view
-    const simulatedData = useMemo(() => {
-        if (timeRange === "1h") return data;
-
-        const count = timeRange === "24h" ? 100 : 300;
-        const labels = generateTimeLabels(timeRange, count);
-
-        if (chartType === "aqi") {
-            const base = data?.[data.length - 1] || { pm25: 12, pm10: 25, co2: 450, tvoc: 0.1, hcho: 0.02, temp: 24, humidity: 55 };
-            const pm25Arr = generateWaveform(base.pm25, timeRange, { volatility: 1 });
-            const pm10Arr = generateWaveform(base.pm10, timeRange, { volatility: 1.2 });
-            const co2Arr = generateWaveform(base.co2, timeRange, { volatility: 0.8 });
-            const tvocArr = generateWaveform(base.tvoc, timeRange, { volatility: 0.9 });
-            const hchoArr = generateWaveform(base.hcho, timeRange, { volatility: 1.1 });
-            const tempArr = generateWaveform(base.temp, timeRange, { volatility: 0.7 });
-
-            return labels.map((l, i) => {
-                const d = new Date(l);
-                return {
-                    time: d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
-                    pm25: pm25Arr[i],
-                    pm10: pm10Arr[i],
-                    co2: co2Arr[i],
-                    tvoc: tvocArr[i],
-                    hcho: hchoArr[i],
-                    temp: tempArr[i],
-                };
-            });
-        } else if (chartType === "water") {
-            // Mock the specific structure generateWaterHistory expects
-            const currentData = {
-                level: data?.[data.length-1]?.level ?? 5.5,
-                ph: data?.[data.length-1]?.ph ?? 7.2,
-                tds: data?.[data.length-1]?.tds ?? 8
-            };
-            const history = generateWaterHistory(currentData as any, timeRange, isMotorOn, count, labels);
-            return labels.map((l, i) => {
-                const d = new Date(l);
-                return {
-                    time: d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
-                    level: history.level[i],
-                    ph: history.ph[i],
-                    tds: history.tds[i]
-                };
-            });
-        }
-        return data;
-    }, [data, timeRange, chartType, isMotorOn]);
-
-    const displayData = simulatedData;
+    const displayData = data;
 
 
     const visiblePollutants = selectedPollutant
@@ -186,16 +139,16 @@ export function ChartModal({
                             {/* Left/Main Column: Time History */}
                             <div className="flex-[7] min-h-0 bg-slate-950/60 rounded-2xl border border-white/10 p-4 relative overflow-hidden group">
                                 <div className="absolute top-4 left-4 z-10 flex items-center gap-2">
-                                  <BarChart3 className="h-4 w-4 text-emerald-400" />
-                                  <span className="text-[10px] font-black uppercase tracking-widest text-slate-500">Pollutant Drift</span>
+                                    <BarChart3 className="h-4 w-4 text-emerald-400" />
+                                    <span className="text-[10px] font-black uppercase tracking-widest text-slate-500">Pollutant Drift</span>
                                 </div>
                                 <div className="absolute inset-0 bg-[url('/grid.svg')] bg-center opacity-5 pointer-events-none" />
-                                
+
                                 <div className="absolute top-4 right-4 z-20 flex bg-slate-900/80 rounded-lg p-1 border border-white/10 shadow-lg">
                                     {(["1h", "24h", "7d"] as const).map((r) => (
                                         <button
                                             key={r}
-                                            onClick={() => setTimeRange(r)}
+                                            onClick={() => onTimeRangeChange(r)}
                                             className={`px-3 py-1 text-[10px] font-bold uppercase rounded transition-all ${timeRange === r
                                                 ? "bg-emerald-500/20 text-emerald-400 shadow-sm"
                                                 : "text-slate-500 hover:text-slate-300"
@@ -254,21 +207,21 @@ export function ChartModal({
                             <div className="flex-[3] min-h-0 flex flex-col gap-4">
                                 <div className="flex-1 bg-slate-950/60 rounded-2xl border border-white/10 p-1 flex flex-col relative overflow-hidden group">
                                     <div className="absolute top-4 left-4 z-10 flex items-center gap-2">
-                                      <PieChartIcon className="h-4 w-4 text-cyan-400" />
-                                      <span className="text-[10px] font-black uppercase tracking-widest text-slate-500">Contribution</span>
+                                        <PieChartIcon className="h-4 w-4 text-cyan-400" />
+                                        <span className="text-[10px] font-black uppercase tracking-widest text-slate-500">Contribution</span>
                                     </div>
-                                    <PollutantDonutChart 
+                                    <PollutantDonutChart
                                         airData={data.length > 0 ? {
                                             pm25: data[data.length - 1].pm25,
                                             pm10: data[data.length - 1].pm10,
                                             co2: data[data.length - 1].co2,
                                             tvoc: data[data.length - 1].tvoc,
                                             hcho: data[data.length - 1].hcho,
-                                        } : undefined} 
-                                        transparent 
+                                        } : undefined}
+                                        transparent
                                     />
                                 </div>
-                                
+
                                 {/* Info Strip */}
                                 <div className="p-4 bg-emerald-500/5 rounded-2xl border border-emerald-500/10 flex flex-col gap-2">
                                     <div className="flex items-center gap-2">
@@ -306,7 +259,7 @@ export function ChartModal({
                                 const latestVal = data.length > 0 ? (data[data.length - 1] as any)[key] : 0;
                                 const unit = key === "level" ? "ft" : key === "tds" ? "ppm" : "";
                                 return (
-                                    <div 
+                                    <div
                                         key={key}
                                         className="bg-slate-900/40 border border-white/5 rounded-2xl p-4 backdrop-blur-xl group hover:border-cyan-500/30 transition-all duration-300"
                                     >
@@ -359,7 +312,7 @@ export function ChartModal({
                                 {(["1h", "24h", "7d"] as const).map((r) => (
                                     <button
                                         key={r}
-                                        onClick={() => setTimeRange(r)}
+                                        onClick={() => onTimeRangeChange(r)}
                                         className={`px-4 py-1.5 text-xs font-bold uppercase rounded-md transition-all ${timeRange === r
                                             ? "bg-cyan-500/20 text-cyan-400 shadow-sm"
                                             : "text-slate-500 hover:text-slate-300"

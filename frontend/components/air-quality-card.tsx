@@ -167,16 +167,8 @@ export function AirQualityCard({ data, activeMetric, onMetricSelect, onExpand, i
         }
       }}
       onClick={onExpand}
-      role="button"
-      tabIndex={0}
-      className={`${transparent ? 'bg-transparent border-none p-0' : 'card-vibrant bg-slate-900/40 border ' + status.border + ' rounded-3xl ' + (compact ? 'p-1' : 'p-6') + ' backdrop-blur-md lg:backdrop-blur-xl'} relative overflow-hidden transition-all duration-200 lg:duration-1000 cursor-pointer hover:shadow-[0_0_30px_rgba(52,211,153,0.1)] active:scale-[0.99] flex flex-col ${transparent ? '' : 'h-full'} ${isVisible ? "opacity-100" : "opacity-0"
-        } ${isOffline ? 'opacity-50 blur-[2px] pointer-events-none' : ''}`}
+      className={`${transparent ? 'bg-transparent border-none p-0' : 'card-vibrant bg-slate-900/40 border ' + status.border + ' rounded-3xl ' + (compact ? 'p-1' : 'p-6') + ' backdrop-blur-md lg:backdrop-blur-xl'} relative overflow-hidden transition-all duration-200 lg:duration-1000 cursor-pointer hover:shadow-[0_0_30px_rgba(52,211,153,0.1)] active:scale-[0.99] flex flex-col ${transparent ? '' : 'h-full'} ${isVisible ? "opacity-100" : "opacity-0"}`}
     >
-      {isOffline && (
-        <div className="absolute top-4 right-4 z-50 bg-red-500 text-white text-[10px] font-bold px-2 py-0.5 rounded-full animate-pulse">
-          OFFLINE
-        </div>
-      )}
       {/* Background Glow - hidden on mobile for performance */}
       {!transparent && (
         <div

@@ -105,29 +105,30 @@ export function SpeedometerGauge({
   irms?: number
   pumpStatus?: string
 }) {
-  const safeMax = Math.max(maxValue || 0, 5);
-  const clampedValue = Math.max(0, Math.min(value, safeMax));
+  const maxAmps = 15;
+  // Guard: irms may arrive as null/undefined from DB — coerce to safe number
+  const safeIrms = Number.isFinite(Number(irms)) ? Number(irms) : 0;
 
-  // 4 color-coded zones: Left→Right = CRITICAL → LOW → MID → HIGH
+  // 4 color-coded zones: Left→Right = CRITICAL → LOW → MID → HIGH based on Amps
   const zones = [
-    { label: "CRITICAL", from: 0, to: 0.25, color: "#d91536e8" },   // Vibrant Red
-    { label: "LOW", from: 0.25, to: 0.5, color: "#f3f627f8" }, // Warm Orange
-    { label: "MID", from: 0.5, to: 0.75, color: "#377deeff" }, // Bright Blue
-    { label: "HIGH", from: 0.75, to: 1, color: "#22c55eff" },   // Vivid Green
+    { label: "CRITICAL", from: 0, to: 0.25, color: "#d91536e8" },   // Vibrant Red (Off/dry run)
+    { label: "LOW", from: 0.25, to: 0.5, color: "#f3f627f8" },      // Warm Orange
+    { label: "MID", from: 0.5, to: 0.75, color: "#377deeff" },      // Bright Blue (Normal operation)
+    { label: "HIGH", from: 0.75, to: 1, color: "#22c55eff" },       // Vivid Green
   ];
 
   // Map status string → ratio (center of the zone)
   const statusToRatio: Record<string, number> = {
-    "OFF": 0.125,  // Center of CRITICAL zone
-    "CRITICAL": 0.125,  // Center of CRITICAL zone
-    "LOW": 0.375,  // Center of LOW zone
-    "MID": 0.625,  // Center of MID zone
-    "HIGH": 0.875,  // Center of HIGH zone
+    "OFF": 0.125,
+    "CRITICAL": 0.125,
+    "LOW": 0.375,
+    "MID": 0.625,
+    "HIGH": 0.875,
   };
 
-  // Priority: use the status string from pump monitor, fallback to ratio-based
-  const activeStatusStr = (status || "OFF").toUpperCase();
-  const ratio = statusToRatio[activeStatusStr] ?? (safeMax === 0 ? 0 : clampedValue / safeMax);
+  // Priority: use the status string from pump monitor, fallback to current load ratio
+  const activeStatusStr = (pumpStatus || status || "OFF").toUpperCase();
+  const ratio = statusToRatio[activeStatusStr] ?? (safeIrms / maxAmps);
 
   const activeZone = zones.find(z => ratio >= z.from && ratio < z.to) || zones[zones.length - 1];
   const activeStatus = activeStatusStr;
@@ -156,9 +157,9 @@ export function SpeedometerGauge({
   const ny = cy - needleLen * Math.sin(needleRad);
 
   return (
-    <div className="flex flex-row items-start justify-between w-full h-full px-2 gap-1 pt-9">
+    <div className="flex flex-row items-start justify-between w-full h-full px-2 gap-1 pt-9 scale-[1.02] transform origin-center">
       {/* Gauge on the Left - Maximized Arc */}
-      <div className="relative h-35 w-[85%] flex items-center justify-center overflow-visible">
+      <div className="relative h-35 w-[86%] flex items-center justify-center overflow-visible">
         <svg viewBox="0 25 360 150" className="h-full w-full drop-shadow-[0_0_15px_rgba(30,41,59,0.3)]">
           {/* Glow filters for each zone */}
           <defs>
@@ -233,18 +234,12 @@ export function SpeedometerGauge({
         </svg>
       </div>
 
-      {/* Vertical Info Bar on the Far Right - Small and Bold */}
+      {/* Vertical Info Bar on the Far Right */}
       <div className="flex flex-col justify-start gap-1 w-[22%] pl-1 mt-1">
         <div className="flex flex-col items-start py-0.04 border-b border-white/5">
-          <div className="text-[8px] font-black uppercase tracking-[0.2em] text-slate-500 mb-0.5">Level</div>
+          <div className="text-[8px] font-black uppercase tracking-[0.2em] text-slate-500 mb-0.5">IRMS</div>
           <div className="text-[13px] font-mono font-black text-cyan-400">
-            {clampedValue.toFixed(1)} <span className="text-[9px] font-normal text-slate-500">ft</span>
-          </div>
-        </div>
-        <div className="flex flex-col items-start py-0.5 border-b border-white/5">
-          <div className="text-[9px] font-black uppercase tracking-[0.2em] text-slate-500 mb-0.5">IRMS</div>
-          <div className="text-[13px] font-mono font-black text-amber-500">
-            {irms.toFixed(1)}
+            {safeIrms.toFixed(1)} <span className="text-[9px] font-normal text-slate-500">A</span>
           </div>
         </div>
         <div className="flex flex-col items-start py-0.5">
@@ -253,7 +248,7 @@ export function SpeedometerGauge({
             className="text-[11px] font-black uppercase tracking-widest leading-none drop-shadow-sm"
             style={{ color: activeZone.color }}
           >
-            {pumpStatus}
+            {activeStatus}
           </div>
         </div>
       </div>

@@ -70,9 +70,9 @@ const saveHistoricalSnapshot = () => {
     if (!rows) return;
     rows.forEach(row => {
       db.run(`INSERT INTO readings_history 
-                (borewell_id, flow_rate, water_level, efficiency, voltage, current) 
-                VALUES (?, ?, ?, ?, ?, ?)`,
-        [row.id, row.flow_rate, row.water_level, row.efficiency, row.voltage, row.current]
+                (borewell_id, flow_rate, water_level, efficiency, voltage, current, ph, tds, turbidity) 
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        [row.id, row.flow_rate, row.water_level, row.efficiency, row.voltage, row.current, row.ph, row.tds, row.turbidity]
       );
     });
     console.log("📈 Historical snapshot saved.");
@@ -84,30 +84,136 @@ setInterval(saveHistoricalSnapshot, 1000 * 60 * 5); // 5 minutes
 app.post('/api/push', (req, res) => {
   const payload = req.body;
 
-  if (payload.type === 'water') {
-    db.run(`UPDATE borewell_state SET 
-      flow_rate = ?, efficiency = ?, voltage = ?, current = ?, run_time_total = ?, water_level = ?, last_updated = CURRENT_TIMESTAMP 
-      WHERE id = ?`,
-      [payload.flow, payload.eff, payload.v, payload.a, payload.rt, payload.wl, payload.id],
-      function (err) {
-        if (err) return console.error(err.message);
+  if (payload.type === 'water' || payload.flow_rate !== undefined || payload.flow_lpm !== undefined || payload.current !== undefined || payload.ph !== undefined || payload.tds !== undefined) {
+    const id = payload.id || 'BW-01';
+    
+    // Retrieve current row values to prevent partial updates from clearing other sensors
+    db.get("SELECT * FROM borewell_state WHERE id = ?", [id], (err, row) => {
+      if (err) return console.error(err.message);
+      
+      const current_state = row || {};
+      
+      // Parse values from payload (coercing strings to safe floats/numbers)
+      const rawFlow = payload.flow_rate !== undefined ? payload.flow_rate : (payload.flow_lpm !== undefined ? payload.flow_lpm : (payload.flow !== undefined ? payload.flow : null));
+      const flow = rawFlow !== null ? parseFloat(rawFlow) : (current_state.flow_rate !== undefined ? current_state.flow_rate : 0.0);
 
-        // Broadcast to Frontend
-        broadcast({
-          type: 'water',
-          id: payload.id,
-          timestamp: new Date().toISOString(),
-          data: {
-            flowRate: payload.flow,
-            efficiency: payload.eff,
-            voltage: payload.v,
-            current: payload.a,
-            runTime: payload.rt,
-            waterLevel: payload.wl
-          }
-        });
+      const rawCurrent = payload.current !== undefined ? payload.current : (payload.a !== undefined ? payload.a : null);
+      const a = rawCurrent !== null ? parseFloat(rawCurrent) : (current_state.current !== undefined ? current_state.current : 0.0);
+
+      const rawPh = payload.ph !== undefined ? payload.ph : null;
+      const phVal = rawPh !== null ? parseFloat(rawPh) : null;
+
+      const rawTds = payload.tds !== undefined ? payload.tds : null;
+      const tdsVal = rawTds !== null ? parseFloat(rawTds) : null;
+
+      const rawTurb = payload.turbidity !== undefined ? payload.turbidity : (payload.turbidity_ntu !== undefined ? payload.turbidity_ntu : null);
+      const turbVal = rawTurb !== null ? parseFloat(rawTurb) : null;
+
+      const incomingLevelTemp = payload.wl !== undefined ? payload.wl : (payload.water_level !== undefined ? payload.water_level : null);
+      const wlVal = incomingLevelTemp !== null ? parseFloat(incomingLevelTemp) : null;
+
+      // Check if incoming payload is a zero-packet (sensor dropout/offline condition)
+      const isZeroWaterPayload = (phVal === 0 || phVal === 0.0) && (tdsVal === 0 || tdsVal === 0.0);
+
+      // 1. Derive Voltage (v) based on Current (a)
+      let v = payload.v !== undefined ? payload.v : (a > 0.5 ? (228.0 - (a * 0.4) + (Math.sin(Date.now() / 5000) * 1.5)) : (235.0 + (Math.sin(Date.now() / 10000) * 1.0)));
+      v = parseFloat(Number(v).toFixed(1));
+
+      // 2. Derive Pump Efficiency (eff)
+      let eff = payload.eff !== undefined ? payload.eff : 0.0;
+      if (payload.eff === undefined && a > 0.5 && flow > 0) {
+        eff = Math.min(92, Math.max(50, Math.round((flow * 14.5) / a)));
       }
-    );
+
+      // 3. Derive Water Level (wl) - simulating drawdown and aquifer recharge
+      let wl = wlVal;
+      if (isZeroWaterPayload || wl === 0) {
+        wl = current_state.water_level !== undefined ? current_state.water_level : 5.5;
+      } else if (wl === null) {
+        let last_wl = current_state.water_level !== undefined ? current_state.water_level : 5.5;
+        if (a > 0.5 && flow > 0) {
+          // Drawdown: Water level decreases as we pump it out
+          wl = Math.max(1.2, last_wl - 0.02 * (flow / 40.0));
+        } else {
+          // Recovery: Water level slowly rises back up to the aquifer static level (5.5m)
+          wl = Math.min(5.5, last_wl + 0.005);
+        }
+      }
+      wl = parseFloat(Number(wl).toFixed(2));
+
+      // 4. Derive Run Time (rt)
+      let rt = payload.rt !== undefined ? payload.rt : null;
+      if (rt === null) {
+        let last_rt = current_state.run_time_total !== undefined ? current_state.run_time_total : 0.0;
+        if (a > 0.5) {
+          let deltaHours = 1.0 / 3600.0;
+          if (current_state.last_updated) {
+            const lastTime = new Date(current_state.last_updated + " UTC").getTime();
+            const deltaMs = Date.now() - lastTime;
+            if (deltaMs > 0 && deltaMs < 300000) {
+              deltaHours = deltaMs / (1000.0 * 3600.0);
+            }
+          }
+          rt = last_rt + deltaHours;
+        } else {
+          rt = last_rt;
+        }
+      }
+      rt = parseFloat(Number(rt).toFixed(3));
+
+      // Preserve last values on zero packet
+      const ph = isZeroWaterPayload ? (current_state.ph !== undefined ? current_state.ph : 7.2) : (phVal !== null ? phVal : (current_state.ph !== undefined ? current_state.ph : 7.2));
+      const tds = isZeroWaterPayload ? (current_state.tds !== undefined ? current_state.tds : 250.0) : (tdsVal !== null ? tdsVal : (current_state.tds !== undefined ? current_state.tds : 250.0));
+      const turbidity = isZeroWaterPayload ? (current_state.turbidity !== undefined ? current_state.turbidity : 1.2) : (turbVal !== null ? turbVal : (current_state.turbidity !== undefined ? current_state.turbidity : 1.2));
+      
+      const rawTotalLiters = payload.total_liters !== undefined ? payload.total_liters : null;
+      const total_liters = rawTotalLiters !== null ? parseFloat(rawTotalLiters) : (current_state.total_liters !== undefined ? current_state.total_liters : 0.0);
+
+      const current_status = payload.current_status !== undefined ? payload.current_status : (current_state.current_status !== undefined ? current_state.current_status : 'OFF');
+      const water_status = isZeroWaterPayload ? (current_state.water_status || 'PROBE DRY') : (payload.water_status !== undefined ? payload.water_status : (current_state.water_status !== undefined ? current_state.water_status : 'NORMAL'));
+      const turbidity_status = isZeroWaterPayload ? (current_state.turbidity_status || 'CLEAR') : (payload.turbidity_status !== undefined ? payload.turbidity_status : (current_state.turbidity_status !== undefined ? current_state.turbidity_status : 'CLEAR'));
+      const tds_status = isZeroWaterPayload ? (current_state.tds_status || 'GOOD') : (payload.tds_status !== undefined ? payload.tds_status : (current_state.tds_status !== undefined ? current_state.tds_status : 'GOOD'));
+
+      // Derive motor status: ON if current (amps) > 0.5A, else OFF
+      const is_motor_on = a > 0.5 ? 1 : 0;
+
+      db.run(`UPDATE borewell_state SET 
+        flow_rate = ?, efficiency = ?, voltage = ?, current = ?, run_time_total = ?, water_level = ?, 
+        ph = ?, tds = ?, turbidity = ?, is_motor_on = ?, total_liters = ?, current_status = ?, 
+        water_status = ?, turbidity_status = ?, tds_status = ?, last_updated = CURRENT_TIMESTAMP 
+        WHERE id = ?`,
+        [flow, eff, v, a, rt, wl, ph, tds, turbidity, is_motor_on, total_liters, current_status, water_status, turbidity_status, tds_status, id],
+        function (err) {
+          if (err) return console.error(err.message);
+
+          console.log(`💧 Water Data Ingested (Merged): ID=${id}, Flow=${flow} LPM, TDS=${tds} ppm (${tds_status}), pH=${ph} (${water_status}), Turbidity=${turbidity} NTU (${turbidity_status}), Amps=${a} (${current_status}), MotorOn=${is_motor_on === 1}`);
+
+          // Broadcast to Frontend
+          broadcast({
+            type: 'water',
+            id: id,
+            timestamp: new Date().toISOString(),
+            isMotorOn: is_motor_on === 1,
+            data: {
+              flowRate: flow,
+              efficiency: eff,
+              voltage: v,
+              current: a,
+              runTime: rt,
+              waterLevel: wl,
+              ph: ph,
+              tds: tds,
+              turbidity: turbidity,
+              totalLiters: total_liters,
+              currentStatus: current_status,
+              waterStatus: water_status,
+              turbidityStatus: turbidity_status,
+              tdsStatus: tds_status
+            }
+          });
+        }
+      );
+    });
   }
   res.sendStatus(200);
 });

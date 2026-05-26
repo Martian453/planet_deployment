@@ -21,52 +21,20 @@ export function MetricHistoryChart({ data, activeMetric, onMetricSelect, timeRan
 
     // Process data based on time range
     const chartData = useMemo(() => {
-        // For 1h, we prefer "real" data (or at least the data passed from parent)
-        if (timeRange === "1h") {
-            if (!data || data.length === 0) return [];
-            return data.slice(-20).map(d => ({
-                time: d.label && d.label.includes("T") 
-                    ? new Date(d.label).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
-                    : d.label || d.time,
-                pm25: d.pm25 ?? 0,
-                pm10: d.pm10 ?? 0,
-                co2: d.co2 ?? 0,
-                tvoc: d.tvoc ?? 0,
-                hcho: d.hcho ?? 0,
-                temp: d.temp ?? 0,
-                humidity: d.humidity ?? 0,
-            }));
-        }
-
-        // For 24h and 7d, we generate synthetic wavy data for demonstration/analysis purposes
-        const count = timeRange === "24h" ? 100 : 300;
-        const labels = generateTimeLabels(timeRange, count);
-        
-        // Get baseline from current data or fallback
-        const base = data?.[data.length - 1] || { pm25: 12, pm10: 25, co2: 450, tvoc: 0.1, hcho: 0.02, temp: 24, humidity: 55 };
-
-        const pm25Arr = generateWaveform(base.pm25, timeRange, { volatility: 1 });
-        const pm10Arr = generateWaveform(base.pm10, timeRange, { volatility: 1.2 });
-        const co2Arr = generateWaveform(base.co2, timeRange, { volatility: 0.8 });
-        const tvocArr = generateWaveform(base.tvoc, timeRange, { volatility: 0.9 });
-        const hchoArr = generateWaveform(base.hcho, timeRange, { volatility: 1.1 });
-        const tempArr = generateWaveform(base.temp, timeRange, { volatility: 0.7 });
-        const humArr = generateWaveform(base.humidity, timeRange, { volatility: 0.7 });
-
-        return labels.map((l, i) => {
-            const d = new Date(l);
-            return {
-                time: d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
-                pm25: pm25Arr[i],
-                pm10: pm10Arr[i],
-                co2: co2Arr[i],
-                tvoc: tvocArr[i],
-                hcho: hchoArr[i],
-                temp: tempArr[i],
-                humidity: humArr[i],
-            };
-        });
-    }, [data, timeRange]);
+        if (!data || data.length === 0) return [];
+        return data.map(d => ({
+            time: d.timestamp
+                ? new Date(d.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+                : d.label || d.time,
+            pm25: d.pm25 ?? 0,
+            pm10: d.pm10 ?? 0,
+            co2: d.co2 ?? 0,
+            tvoc: d.tvoc ?? 0,
+            hcho: d.hcho ?? 0,
+            temp: d.temp ?? 0,
+            humidity: d.humidity ?? 0,
+        }));
+    }, [data]);
 
     const metrics = [
         { key: 'pm25', label: 'PM2.5', color: '#f97316' }, // Orange

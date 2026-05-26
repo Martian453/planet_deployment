@@ -19,39 +19,47 @@ function formatMonthLabel(d: Date) {
 export function buildHistoricalReadingsSeries(
   period: HistoricalPeriod,
   latestWater: number,
-  latestAqiProxy: number
+  latestAqiProxy: number,
+  isOffline?: boolean
 ): { labels: string[]; waterLevels: number[]; aqiValues: number[] } {
   const days = period === "week" ? 7 : 30
   const labels: string[] = []
   const waterLevels: number[] = []
   const aqiValues: number[] = []
 
-  const w0 = Number.isFinite(latestWater) ? latestWater : 5
-  const a0 = Number.isFinite(latestAqiProxy) ? latestAqiProxy : 50
+  const w0 = (Number.isFinite(latestWater) && latestWater > 0 && !isOffline) ? latestWater : 0
+  const a0 = (Number.isFinite(latestAqiProxy) && !isOffline) ? latestAqiProxy : 0
 
   for (let i = days - 1; i >= 0; i--) {
     const d = new Date()
     d.setDate(d.getDate() - i)
     labels.push(toISODateLabel(d))
-    const t = i / Math.max(1, days - 1)
-    const drift = Math.sin(t * Math.PI * 2) * 0.08
-    const noise = (Math.random() - 0.5) * 0.06
-    waterLevels.push(
-      Math.max(0, w0 * (0.92 + drift + noise))
-    )
-    aqiValues.push(
-      Math.max(0, a0 * (0.94 + drift * 0.5 + noise))
-    )
+    
+    if (isOffline || w0 === 0) {
+      waterLevels.push(0)
+      aqiValues.push(0)
+    } else {
+      const t = i / Math.max(1, days - 1)
+      const drift = Math.sin(t * Math.PI * 2) * 0.08
+      const noise = (Math.random() - 0.5) * 0.06
+      waterLevels.push(
+        Math.max(0, w0 * (0.92 + drift + noise))
+      )
+      aqiValues.push(
+        Math.max(0, a0 * (0.94 + drift * 0.5 + noise))
+      )
+    }
   }
 
   return { labels, waterLevels, aqiValues }
 }
 
 export function buildYearlyMonthlyWaterLevelComparison(
-  latestWater: number
+  latestWater: number,
+  isOffline?: boolean
 ): { labels: string[]; waterLevels: number[] } {
   // 12 months Jan..Dec with soft variation around latestWater.
-  const w0 = Number.isFinite(latestWater) ? latestWater : 5
+  const w0 = (Number.isFinite(latestWater) && latestWater > 0 && !isOffline) ? latestWater : 0
   const labels: string[] = []
   const waterLevels: number[] = []
 
@@ -62,11 +70,14 @@ export function buildYearlyMonthlyWaterLevelComparison(
     const d = new Date(year, month, 1)
     labels.push(formatMonthLabel(d))
 
-    const t = month / 11
-    const seasonal = Math.sin((t + 0.15) * Math.PI * 2) * 0.12
-    const noise = (Math.random() - 0.5) * 0.08
-
-    waterLevels.push(Math.max(0, w0 * (0.88 + seasonal + noise)))
+    if (isOffline || w0 === 0) {
+      waterLevels.push(0)
+    } else {
+      const t = month / 11
+      const seasonal = Math.sin((t + 0.15) * Math.PI * 2) * 0.12
+      const noise = (Math.random() - 0.5) * 0.08
+      waterLevels.push(Math.max(0, w0 * (0.88 + seasonal + noise)))
+    }
   }
 
   return { labels, waterLevels }

@@ -111,8 +111,8 @@ export function RecentReadingsTable({
                 labelStyle={{ color: "#e2e8f0" }}
                 formatter={(value: any, name: string) => [`${Number(value).toFixed(1)} ft`, name === "current" ? "2026 (current)" : "2025 (previous)"]}
               />
-              <Bar dataKey="previous" fill="rgba(148, 163, 184, 0.35)" radius={[6, 6, 0, 0]} barSize={26} />
-              <Bar dataKey="current" fill="#22d3ee" radius={[6, 6, 0, 0]} barSize={26} />
+              <Bar dataKey="previous" fill="rgba(148, 163, 184, 0.35)" radius={[4, 4, 0, 0]} barSize={6} />
+              <Bar dataKey="current" fill="#22d3ee" radius={[4, 4, 0, 0]} barSize={6} />
             </BarChart>
           </ResponsiveContainer>
         </div>

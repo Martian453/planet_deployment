@@ -50,10 +50,9 @@ export function BorewellMonitorCard({
           Aquifer Monitor {activeBorewellIndex + 1}
         </h3>
 
-        {/* Toggle Switch */}
-        <button
-          onClick={onMotorToggle}
-          className={`relative w-14 h-6 flex items-center rounded-full transition-all duration-300 border ${isMotorOn ? "bg-[#022c22] border-[#059669]" : "bg-slate-800 border-slate-600"
+        {/* Toggle Switch (Read-only status display) */}
+        <div
+          className={`relative w-14 h-6 flex items-center rounded-full transition-all duration-300 border select-none pointer-events-none ${isMotorOn ? "bg-[#022c22] border-[#059669]" : "bg-slate-800 border-slate-600"
             }`}
         >
           <span className={`absolute text-[9px] font-black uppercase tracking-widest transition-all duration-300 ${isMotorOn ? "left-2 text-[#10b981]" : "right-1.5 text-slate-400"
@@ -64,7 +63,7 @@ export function BorewellMonitorCard({
             }`}>
             <Power className={`h-3 w-3 ${isMotorOn ? "text-[#022c22]" : "text-slate-300"}`} strokeWidth={3} />
           </div>
-        </button>
+        </div>
       </div>
 
       {/* MAIN CONTENT AREA WITH SLIDING WRAPPER */}

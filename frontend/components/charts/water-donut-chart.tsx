@@ -14,6 +14,11 @@ interface WaterDonutChartProps {
         ph: number
         level: number
         irms?: number
+        flow?: number
+        flowRate?: number
+        totalLiters?: number
+        liters?: string | number
+        turbidity?: number
     }
     transparent?: boolean
     sideBySide?: boolean
@@ -24,39 +29,50 @@ export function WaterDonutChart({ waterData, transparent = false, sideBySide = f
 
     const data = useMemo(() => {
         if (!waterData) return [
-            { name: "Loading...", value: 1, rawValue: 0, unit: "", color: "#334155" }
+            { name: "Loading...", value: 1, chartValue: 25, rawValue: 0, unit: "", color: "#334155" }
         ];
 
         // Scientific scoring for the WQI analysis (normalized 0-100)
-        const purityScore = Math.max(0, 100 - (waterData.tds / 15));
+        const volumeValue = waterData.totalLiters !== undefined 
+            ? waterData.totalLiters 
+            : (waterData.liters !== undefined ? Number(waterData.liters) : 0.0);
+            
+        const turbidityValue = waterData.turbidity !== undefined ? waterData.turbidity : 0.0;
+        const tdsValue = waterData.tds !== undefined ? waterData.tds : 0.0;
+        const phValue = waterData.ph !== undefined ? waterData.ph : 7.0;
+
         const scores = [
             { 
-                name: "Purity", 
-                value: purityScore, 
-                rawValue: purityScore, 
-                unit: "%", 
+                name: "Volume", 
+                value: Math.min(100, (volumeValue / 2000) * 100), // Scale target of 2000 L
+                chartValue: 25,
+                rawValue: volumeValue, 
+                unit: "L", 
                 color: "#34d399" 
             },
             {
                 name: "pH Balance",
                 // Centers 100% at pH 7.0; drops as it deviates
-                value: Math.max(0, (7 - Math.abs(7 - waterData.ph)) * 14.28),
-                rawValue: waterData.ph,
+                value: Math.max(0, (7 - Math.abs(7 - phValue)) * 14.28),
+                chartValue: 25,
+                rawValue: phValue,
                 unit: "pH",
                 color: "#60a5fa"
             },
             {
-                name: "Stability",
-                value: 85,
-                rawValue: 85,
-                unit: "%",
+                name: "Turbidity",
+                value: Math.max(0, 100 - (turbidityValue * 20)),
+                chartValue: 25,
+                rawValue: turbidityValue,
+                unit: "NTU",
                 color: "#a855f7"
             },
             {
                 name: "TDS",
                 // Proportional impact (normalized for donut display)
-                value: Math.min(100, (waterData.tds / 10)),
-                rawValue: waterData.tds,
+                value: Math.min(100, (tdsValue / 500) * 100),
+                chartValue: 25,
+                rawValue: tdsValue,
                 unit: "ppm",
                 color: "#fb923c"
             },
@@ -78,7 +94,9 @@ export function WaterDonutChart({ waterData, transparent = false, sideBySide = f
                     {/* Center Text */}
                     <div className="absolute inset-0 flex flex-col items-center justify-center pointer-events-none z-10">
                         <span className={`${sideBySide ? 'text-xl' : 'text-2xl'} font-bold text-white drop-shadow-[0_0_10px_rgba(0,0,0,0.5)] transition-transform duration-500`}>
-                            {Math.round(activeItem.rawValue)}
+                            {activeItem.name === "pH Balance" || activeItem.name === "Turbidity" 
+                                ? activeItem.rawValue.toFixed(1) 
+                                : Math.round(activeItem.rawValue)}
                         </span>
                         <span className={`${sideBySide ? 'text-[8px]' : 'text-[10px]'} uppercase font-black tracking-widest`} style={{ color: activeItem.color }}>
                             {activeItem.unit}
@@ -92,7 +110,7 @@ export function WaterDonutChart({ waterData, transparent = false, sideBySide = f
                                 innerRadius={sideBySide ? 32 : 47}
                                 outerRadius={sideBySide ? 52 : 62}
                                 paddingAngle={4}
-                                dataKey="value"
+                                dataKey="chartValue"
                                 onMouseEnter={onPieEnter}
                                 stroke="none"
                                 cornerRadius={6}

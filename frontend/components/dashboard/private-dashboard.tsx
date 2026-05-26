@@ -31,7 +31,13 @@ type AirState = {
 
 type WaterState = {
     level: number; ph: number; tds: number; irms: number; pump_status: string;
-    chartData: { labels: string[], level: number[], ph: number[], tds: number[] }
+    flow?: number; flowRate?: number; efficiency?: number; voltage?: number; runTime?: number; turbidity?: number;
+    totalLiters?: number;
+    currentStatus?: string;
+    waterStatus?: string;
+    turbidityStatus?: string;
+    tdsStatus?: string;
+    chartData: { labels: string[], level: number[], ph: number[], tds: number[], turbidity?: number[] }
 };
 
 function clamp(n: number, min: number, max: number) {
@@ -63,6 +69,8 @@ export function PrivateDashboard() {
     const [maxWaterLevel, setMaxWaterLevel] = useState(0)
     const hasAutoSelected = useRef(false); // Track smart auto-selection
     const [waterStatus, setWaterStatus] = useState<string | null>(null)
+    const [loopIndex, setLoopIndex] = useState(0);
+    const waterDataRef = require('react').useRef(null);
     // PRODUCTIZATION STATE
     // PRODUCTIZATION STATE
     const [selectedPollutant, setSelectedPollutant] = useState<string | null>(null);
@@ -73,14 +81,14 @@ export function PrivateDashboard() {
     const [readingsModalOpen, setReadingsModalOpen] = useState(false)
     const [activeBorewellIndex, setActiveBorewellIndex] = useState(0);
     const [borewells, setBorewells] = useState([
-        { id: 1, isMotorOn: true, runTime: 4.5 * 3600 },
-        { id: 2, isMotorOn: false, runTime: 1.2 * 3600 },
-        { id: 3, isMotorOn: false, runTime: 0.8 * 3600 },
+        { id: "BW-01", isMotorOn: false, runTime: 0 },
+        { id: "BW-02", isMotorOn: false, runTime: 0 },
+        { id: "BW-03", isMotorOn: false, runTime: 0 },
     ]);
 
     // HYDRATION GUARD INITIALIZATION
     const [mounted, setMounted] = useState(false);
-    const [demoMode, setDemoMode] = useState(true) // Set to true for HR Demo Mode
+    const [demoMode, setDemoMode] = useState(false) // Set to false to receive live backend data
     const [isInitialLoading, setIsInitialLoading] = useState(true);
 
     useEffect(() => {
@@ -95,7 +103,7 @@ export function PrivateDashboard() {
 
     // Location Management
     const [locations, setLocations] = useState<any[]>([])
-    const [currentLocation, setCurrentLocation] = useState("")
+    const [currentLocation, setCurrentLocation] = useState("BLR-01")
     const [capabilities, setCapabilities] = useState({ has_aqi: true, has_water: true })
 
     // Devices State
@@ -114,7 +122,7 @@ export function PrivateDashboard() {
         const interval = setInterval(() => {
             setCurrentTime(Date.now());
             if (demoMode) {
-                setBorewells(prev => prev.map(bw => 
+                setBorewells(prev => prev.map(bw =>
                     bw.isMotorOn ? { ...bw, runTime: bw.runTime + 1 } : bw
                 ));
             }
@@ -124,11 +132,15 @@ export function PrivateDashboard() {
 
 
 
-    const isMotorOn = borewells[activeBorewellIndex].isMotorOn;
-    const motorRunTime = borewells[activeBorewellIndex].runTime;
+    const now = currentTime;
+    const isAirOnline = lastAirTime > 0 && (now - lastAirTime < 300000);
+    const isWaterOnline = lastWaterTime > 0 && (now - lastWaterTime < 300000);
 
-    const isAirOffline = false; // Forced active
-    const isWaterOffline = false; // Forced active
+    const isAirOffline = !isAirOnline;
+    const isWaterOffline = !isWaterOnline;
+
+    const isMotorOn = !isWaterOffline && borewells[activeBorewellIndex].isMotorOn;
+    const motorRunTime = borewells[activeBorewellIndex].runTime;
 
     // Status Logic
     let locationStatus: "ONLINE" | "PARTIAL" | "OFFLINE" = "OFFLINE";
@@ -314,7 +326,7 @@ export function PrivateDashboard() {
     // 3.5. Live Data Polling Fallback (Self-Healing if WS fails)
     useEffect(() => {
         if (demoMode) return; // Only if not in full demo
-        
+
         const fetchLatestData = async () => {
             try {
                 // Fetch latest AQI
@@ -322,16 +334,16 @@ export function PrivateDashboard() {
                 if (aqiRes.ok) {
                     const history = await aqiRes.json();
                     if (history.length > 0) {
-                        const latest = history[0];
+                        const latest = history[history.length - 1];
                         setAirData(prev => {
                             // Only update if it's actually newer than what we have
                             if (prev && new Date(latest.timestamp).getTime() <= lastAirTime) return prev;
-                            
+
                             const currentChart = prev?.chartData || { labels: [], pm25: [], pm10: [], co2: [], tvoc: [], hcho: [], temp: [], humidity: [] };
                             const timeLabel = new Date(latest.timestamp).toLocaleTimeString('en-US', { hour12: false, hour: '2-digit', minute: '2-digit' });
-                            
+
                             setLastAirTime(new Date(latest.timestamp).getTime());
-                            
+
                             return {
                                 ...latest,
                                 chartData: {
@@ -416,29 +428,66 @@ export function PrivateDashboard() {
                 };
             });
         } else if (wsData && (wsData.type === 'water' || wsData.type === 'water_sensor')) {
-            setWaterData(prev => {
-                const incoming = wsData.data;
-                const hasTankData = 'level' in incoming;
-                // We check for either 'irms' or the explicit 'status' field sent by the pump monitor
-                const hasPumpData = 'irms' in incoming || 'status' in incoming;
+            const incomingId = 'BW-01'; // Force all incoming water data to Borewell 1 (BW-01)
+            const activeId = borewells[activeBorewellIndex]?.id;
 
-                const currentChart = prev?.chartData || { labels: [], level: [], ph: [], tds: [] };
+            const incoming = wsData.data as any;
+            const incomingLevel = incoming.waterLevel ?? incoming.level;
+            const incomingIrms = incoming.current ?? incoming.irms;
+            const hasPumpData = 'current' in incoming || 'irms' in incoming || 'status' in incoming;
+            const hasTankData = 'waterLevel' in incoming || 'level' in incoming || 'ph' in incoming || 'tds' in incoming || 'turbidity' in incoming;
+
+            const isZeroWater = hasTankData && (incomingLevel === 0 || incomingLevel === undefined) && incoming.ph === 0 && incoming.tds === 0;
+
+            // 1. Process status updates for ALL borewells so their states remain correct
+            // Force motor state to OFF if a zero-value packet is received
+            const isIncomingMotorOn = !isZeroWater && (incoming.status === 'ON' || (incomingIrms !== undefined && incomingIrms > 0.2));
+            if (hasPumpData || isZeroWater) {
+                setBorewells(prev => prev.map(bw => {
+                    if (bw.id === incomingId) {
+                        return {
+                            ...bw,
+                            isMotorOn: isIncomingMotorOn,
+                            runTime: incoming.runTime !== undefined ? incoming.runTime * 3600 : bw.runTime
+                        };
+                    }
+                    return bw;
+                }));
+            }
+
+            // Discard the update if it is a zero-packet to preserve the last known valid historical snapshot
+            if (isZeroWater) {
+                return;
+            }
+
+            // 2. Only update waterData if the ID matches the selected/active borewell
+            if (incomingId && activeId && incomingId !== activeId) {
+                return;
+            }
+
+            setWaterData(prev => {
+                const incomingLevel = incoming.waterLevel ?? incoming.level;
+
+                const hasTankData = 'waterLevel' in incoming || 'level' in incoming || 'ph' in incoming || 'tds' in incoming || 'turbidity' in incoming;
+                const currentChart = prev?.chartData || { labels: [], level: [], ph: [], tds: [], turbidity: [] };
 
                 let newLabels = currentChart.labels;
                 let newLevelArr = currentChart.level;
                 let newPhArr = currentChart.ph;
                 let newTdsArr = currentChart.tds;
+                let newTurbidityArr = currentChart.turbidity || [];
 
                 // Only append to the chart history if this was a water tank reading
                 if (hasTankData) {
                     const timeLabel = new Date().toLocaleTimeString('en-US', { hour12: false, hour: '2-digit', minute: '2-digit' });
                     newLabels = [...currentChart.labels, timeLabel].slice(-100);
-                    newLevelArr = [...currentChart.level, incoming.level].slice(-100);
-                    newPhArr = [...currentChart.ph, incoming.ph ?? prev?.ph ?? 0].slice(-100);
-                    newTdsArr = [...currentChart.tds, incoming.tds ?? prev?.tds ?? 0].slice(-100);
+                    newLevelArr = [...currentChart.level, incomingLevel ?? prev?.level ?? 4.5].slice(-100);
+                    newPhArr = [...currentChart.ph, incoming.ph ?? prev?.ph ?? 7.2].slice(-100);
+                    newTdsArr = [...currentChart.tds, incoming.tds ?? prev?.tds ?? 250].slice(-100);
+                    newTurbidityArr = [...(currentChart.turbidity || []), incoming.turbidity ?? prev?.turbidity ?? 1.2].slice(-100);
 
                     // Offline heartbeat update ONLY if it's a valid tank reading
-                    const isZeroWater = incoming.level === 0 && incoming.ph === 0 && incoming.tds === 0;
+                    const isZeroWater = (incomingLevel === 0 || incomingLevel === undefined) && incoming.ph === 0 && incoming.tds === 0;
                     if (!isZeroWater) {
                         setLastWaterTime(Date.now());
                     }
@@ -453,12 +502,10 @@ export function PrivateDashboard() {
                 let derivedStatus: string | null = waterStatus; // keep old status by default
 
                 if (hasPumpData) {
-                    // Pump monitor sends exact status string
                     if (incoming.status && typeof incoming.status === "string") {
                         derivedStatus = (incoming as any).status.toUpperCase();
                     } else {
-                        // Fallback logic if needed
-                        const irms = incoming.irms ?? 0;
+                        const irms = incomingIrms ?? 0;
                         if (irms < 2) derivedStatus = "OFF";
                         else if (irms < 4) derivedStatus = "LOW";
                         else if (irms < 7) derivedStatus = "MID";
@@ -466,8 +513,7 @@ export function PrivateDashboard() {
                         else derivedStatus = "CRITICAL";
                     }
                 } else if (!prev?.pump_status || prev.pump_status === 'N/A') {
-                    // Fallback to deriving from level ONLY if no pump data exists yet
-                    const level = incoming.level ?? prev?.level ?? 0;
+                    const level = incomingLevel ?? prev?.level ?? 4.5;
                     if (level < 2) derivedStatus = "OFF";
                     else if (level < 4) derivedStatus = "LOW";
                     else if (level < 7) derivedStatus = "MID";
@@ -478,21 +524,38 @@ export function PrivateDashboard() {
                 setWaterStatus(derivedStatus);
 
                 return {
-                    level: hasTankData ? incoming.level : (prev?.level ?? 0),
-                    ph: hasTankData ? (incoming.ph ?? prev?.ph ?? 0) : (prev?.ph ?? 0),
-                    tds: hasTankData ? (incoming.tds ?? prev?.tds ?? 0) : (prev?.tds ?? 0),
-                    irms: hasPumpData ? (incoming.irms ?? prev?.irms ?? 0) : (prev?.irms ?? 0),
-                    pump_status: hasPumpData ? (derivedStatus ?? 'N/A') : (prev?.pump_status ?? 'N/A'),
+                    level: incomingLevel ?? (prev?.level ?? 4.5),
+                    ph: incoming.ph ?? (prev?.ph ?? 7.2),
+                    tds: incoming.tds ?? (prev?.tds ?? 250),
+                    irms: incomingIrms ?? (prev?.irms ?? 0),
+                    flowRate: incoming.flowRate ?? (prev?.flowRate ?? 0),
+                    efficiency: incoming.efficiency ?? (prev?.efficiency ?? 0),
+                    voltage: incoming.voltage ?? (prev?.voltage ?? 0),
+                    runTime: incoming.runTime ?? (prev?.runTime ?? 0),
+                    turbidity: incoming.turbidity ?? (prev?.turbidity ?? 1.2),
+                    pump_status: incoming.currentStatus ?? (hasPumpData ? (derivedStatus ?? 'N/A') : (prev?.pump_status ?? 'N/A')),
+                    totalLiters: incoming.totalLiters ?? prev?.totalLiters,
+                    currentStatus: incoming.currentStatus ?? prev?.currentStatus,
+                    waterStatus: incoming.waterStatus ?? prev?.waterStatus,
+                    turbidityStatus: incoming.turbidityStatus ?? prev?.turbidityStatus,
+                    tdsStatus: incoming.tdsStatus ?? prev?.tdsStatus,
                     chartData: {
                         labels: newLabels,
                         level: newLevelArr,
                         ph: newPhArr,
-                        tds: newTdsArr
+                        tds: newTdsArr,
+                        turbidity: newTurbidityArr
                     }
                 }
             });
+        } else if (wsData && (wsData.type as string) === 'control_update') {
+            const incomingId = (wsData as any).id;
+            const isMotorOn = (wsData as any).is_motor_on;
+            setBorewells(prev => prev.map(bw =>
+                bw.id === incomingId ? { ...bw, isMotorOn } : bw
+            ));
         }
-    }, [wsData, demoMode]);
+    }, [wsData, demoMode, activeBorewellIndex, borewells]);
 
     // 5. DEMO MODE: generate realistic random data so UI is functional without backend
     useEffect(() => {
@@ -607,7 +670,7 @@ export function PrivateDashboard() {
                 if (isMotorOn) {
                     const baseIrms = level < 2 ? rand(9.5, 12.5) : level < 4 ? rand(7.0, 9.5) : rand(4.5, 7.5);
                     irms = clamp(nextRandomWalk(baseIrms, 0.4, 0.1, 15), 0.1, 15);
-                    
+
                     if (irms < 4) pump_status = "LOW";
                     else if (irms < 7) pump_status = "MID";
                     else if (irms < 12) pump_status = "HIGH";
@@ -654,7 +717,7 @@ export function PrivateDashboard() {
         const currentStatus = borewells[index].isMotorOn ? 'OFF' : 'ON';
 
         // Update UI immediately (Optimistic)
-        setBorewells(prev => prev.map((bw, i) => 
+        setBorewells(prev => prev.map((bw, i) =>
             i === index ? { ...bw, isMotorOn: !bw.isMotorOn } : bw
         ));
 
@@ -682,51 +745,86 @@ export function PrivateDashboard() {
                         isMotorOn: bw.is_motor_on === 1,
                         runTime: bw.run_time_total
                     })));
-                    
+
                     // Update current water data with latest values from DB
                     const active = data[activeBorewellIndex];
                     if (active) {
+                        if (active.last_updated) {
+                            const utcStr = active.last_updated.replace(' ', 'T') + 'Z';
+                            const lastTime = new Date(utcStr).getTime();
+                            if (!isNaN(lastTime)) {
+                                setLastWaterTime(lastTime);
+                            }
+                        }
+                        const isDbZero = active.ph === 0 && active.tds === 0 && (active.water_level === 0 || active.water_level === null);
                         setWaterData(prev => ({
                             ...prev,
-                            level: active.water_level,
-                            ph: prev?.ph || 7.2,
-                            tds: prev?.tds || 250,
-                            irms: active.current,
-                            pump_status: active.is_motor_on ? "MID" : "OFF"
+                            level: isDbZero ? (prev?.level ?? 0) : (active.water_level ?? prev?.level ?? 0),
+                            ph: isDbZero ? (prev?.ph ?? 7.2) : (active.ph || prev?.ph || 7.2),
+                            tds: isDbZero ? (prev?.tds ?? 250) : (active.tds || prev?.tds || 250),
+                            irms: active.current ?? prev?.irms ?? 0,
+                            flowRate: active.flow_rate ?? prev?.flowRate ?? 0,
+                            efficiency: active.efficiency ?? prev?.efficiency ?? 0,
+                            voltage: active.voltage ?? prev?.voltage ?? 0,
+                            runTime: active.run_time_total ?? prev?.runTime ?? 0,
+                            turbidity: isDbZero ? (prev?.turbidity ?? 1.2) : (active.turbidity || prev?.turbidity || 1.2),
+                            pump_status: active.current_status || (active.is_motor_on ? "MID" : "OFF"),
+                            totalLiters: active.total_liters ?? prev?.totalLiters,
+                            currentStatus: active.current_status,
+                            waterStatus: active.water_status,
+                            turbidityStatus: active.turbidity_status,
+                            tdsStatus: active.tds_status
                         } as any));
                     }
                 }
-            });
+            })
+            .catch(err => console.warn("Failed to fetch borewells state:", err));
 
         // 2. Fetch History for Charts
-        const activeId = borewells[activeBorewellIndex].id;
-        fetch(getApiUrl(`/api/history/${activeId}`))
-            .then(res => res.json())
-            .then(history => {
-                if (Array.isArray(history)) {
-                    setWaterData(prev => {
-                        const labels = history.map(h => new Date(h.timestamp).toLocaleTimeString('en-US', { hour12: false, hour: '2-digit', minute: '2-digit' }));
-                        const levels = history.map(h => h.water_level);
-                        const phs = history.map(h => h.ph || 7.2);
-                        const tdss = history.map(h => h.tds || 250);
-                        
-                        return {
-                            ...prev,
-                            chartData: {
-                                labels: labels,
-                                level: levels,
-                                ph: phs,
-                                tds: tdss
-                            }
-                        } as any;
-                    });
-                }
-            });
+        const activeId = borewells[activeBorewellIndex]?.id;
+        if (activeId) {
+            const limit = timeRange === "1h" ? 50 : timeRange === "24h" ? 300 : 1000;
+            fetch(getApiUrl(`/api/history/${activeId}?limit=${limit}`))
+                .then(res => res.json())
+                .then(history => {
+                    if (Array.isArray(history)) {
+                        setWaterData(prev => {
+                            const labels = history.map(h => new Date(h.timestamp).toLocaleTimeString('en-US', { hour12: false, hour: '2-digit', minute: '2-digit' }));
+                            const levels = history.map(h => h.water_level);
+                            const phs = history.map(h => h.ph || 7.2);
+                            const tdss = history.map(h => h.tds || 250);
+                            const turbidities = history.map(h => h.turbidity || 1.2);
+
+                            return {
+                                ...prev,
+                                chartData: {
+                                    labels: labels,
+                                    level: levels,
+                                    ph: phs,
+                                    tds: tdss,
+                                    turbidity: turbidities
+                                }
+                            } as any;
+                        });
+                    }
+                })
+                .catch(err => console.warn(`Failed to fetch history for ${activeId}:`, err));
+        }
 
         fetch(getApiUrl(`/api/aqi/history`))
             .then(res => res.json())
             .then(history => {
                 if (Array.isArray(history)) {
+                    if (history.length > 0) {
+                        const latest = history[history.length - 1];
+                        if (latest && latest.timestamp) {
+                            const utcStr = latest.timestamp.replace(' ', 'T') + 'Z';
+                            const lastTime = new Date(utcStr).getTime();
+                            if (!isNaN(lastTime)) {
+                                setLastAirTime(lastTime);
+                            }
+                        }
+                    }
                     setAirData(prev => {
                         const labels = history.map(h => new Date(h.timestamp).toLocaleTimeString('en-US', { hour12: false, hour: '2-digit', minute: '2-digit' }));
                         const pm25s = history.map(h => h.pm25);
@@ -736,16 +834,16 @@ export function PrivateDashboard() {
                         const hchos = history.map(h => h.hcho);
                         const temps = history.map(h => h.temp);
                         const hums = history.map(h => h.humidity);
-                        
+
                         return {
                             ...prev,
-                            pm25: history[history.length-1]?.pm25 ?? prev?.pm25 ?? 0,
-                            pm10: history[history.length-1]?.pm10 ?? prev?.pm10 ?? 0,
-                            co2: history[history.length-1]?.co2 ?? prev?.co2 ?? 400,
-                            tvoc: history[history.length-1]?.tvoc ?? prev?.tvoc ?? 0,
-                            hcho: history[history.length-1]?.hcho ?? prev?.hcho ?? 0,
-                            temp: history[history.length-1]?.temp ?? prev?.temp ?? 0,
-                            humidity: history[history.length-1]?.humidity ?? prev?.humidity ?? 0,
+                            pm25: history[history.length - 1]?.pm25 ?? prev?.pm25 ?? 0,
+                            pm10: history[history.length - 1]?.pm10 ?? prev?.pm10 ?? 0,
+                            co2: history[history.length - 1]?.co2 ?? prev?.co2 ?? 400,
+                            tvoc: history[history.length - 1]?.tvoc ?? prev?.tvoc ?? 0,
+                            hcho: history[history.length - 1]?.hcho ?? prev?.hcho ?? 0,
+                            temp: history[history.length - 1]?.temp ?? prev?.temp ?? 0,
+                            humidity: history[history.length - 1]?.humidity ?? prev?.humidity ?? 0,
                             chartData: {
                                 labels: labels,
                                 pm25: pm25s,
@@ -759,8 +857,9 @@ export function PrivateDashboard() {
                         } as any;
                     });
                 }
-            });
-    }, [demoMode, activeBorewellIndex]);
+            })
+            .catch(err => console.warn("Failed to fetch AQI history:", err));
+    }, [demoMode, activeBorewellIndex, borewells, timeRange]);
 
     // Visual Effects... (Existing)
     const [stars, setStars] = useState<Array<{ left: string; top: string; delay: string; duration: string }>>([])
@@ -789,7 +888,24 @@ export function PrivateDashboard() {
         pm25: 0, pm10: 0, co2: 400, tvoc: 0, hcho: 0, temp: 0, humidity: 0,
         chartData: { labels: [], pm25: [], pm10: [], co2: [], tvoc: [], hcho: [], temp: [], humidity: [] }
     };
-    const safeWaterData = waterData || { level: 0, ph: 0, tds: 0, irms: 0, pump_status: 'N/A', chartData: { labels: [], level: [], ph: [], tds: [] } };
+    const safeWaterData = {
+        level: Number(waterData?.level ?? 0),
+        ph: Number(waterData?.ph ?? 7.2),
+        tds: Number(waterData?.tds ?? 250),
+        irms: Number(waterData?.irms ?? 0),
+        pump_status: waterData?.pump_status ?? 'N/A',
+        flowRate: Number(waterData?.flowRate ?? 0),
+        efficiency: Number(waterData?.efficiency ?? 0),
+        voltage: Number(waterData?.voltage ?? 0),
+        runTime: Number(waterData?.runTime ?? 0),
+        turbidity: Number(waterData?.turbidity ?? 1.2),
+        totalLiters: (waterData?.totalLiters !== undefined && waterData?.totalLiters !== null) ? Number(waterData.totalLiters) : undefined,
+        currentStatus: waterData?.currentStatus,
+        waterStatus: waterData?.waterStatus,
+        turbidityStatus: waterData?.turbidityStatus,
+        tdsStatus: waterData?.tdsStatus,
+        chartData: waterData?.chartData || { labels: [], level: [], ph: [], tds: [] }
+    };
     const maxPm25Recorded = airData ? Math.max(airData.pm25, ...(airData.chartData?.pm25 || [])) : 0;
     const maxWaterLevelRecorded = waterData ? Math.max(waterData.level, ...(waterData.chartData?.level || [])) : 0;
 
@@ -798,14 +914,15 @@ export function PrivateDashboard() {
             buildHistoricalReadingsSeries(
                 readingsPeriod,
                 safeWaterData.level,
-                safeAirData.pm25
+                safeAirData.pm25,
+                isWaterOffline
             ),
-        [readingsPeriod, safeWaterData.level, safeAirData.pm25]
+        [readingsPeriod, safeWaterData.level, safeAirData.pm25, isWaterOffline]
     )
 
     const yearlyWaterComparison = useMemo(
-        () => buildYearlyMonthlyWaterLevelComparison(safeWaterData.level),
-        [safeWaterData.level]
+        () => buildYearlyMonthlyWaterLevelComparison(safeWaterData.level, isWaterOffline),
+        [safeWaterData.level, isWaterOffline]
     )
 
     // --- INTERACTION HANDLERS ---
@@ -911,9 +1028,17 @@ export function PrivateDashboard() {
                         <div className="flex items-center gap-3">
                             <div className={`flex items-center gap-1.5 px-2 py-1 rounded-full text-[10px] font-bold uppercase tracking-wider border ${locationStatus === 'ONLINE'
                                 ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20'
-                                : 'bg-red-500/10 text-red-400 border-red-500/20'
+                                : locationStatus === 'PARTIAL'
+                                    ? 'bg-amber-500/10 text-amber-400 border-amber-500/20'
+                                    : 'bg-red-500/10 text-red-400 border-red-500/20'
                                 }`}>
-                                {locationStatus === 'ONLINE' ? <Wifi className="h-3 w-3" /> : <WifiOff className="h-3 w-3" />}
+                                {locationStatus === 'ONLINE' ? (
+                                    <Wifi className="h-3 w-3" />
+                                ) : locationStatus === 'PARTIAL' ? (
+                                    <Wifi className="h-3 w-3 animate-pulse" />
+                                ) : (
+                                    <WifiOff className="h-3 w-3" />
+                                )}
                                 {locationStatus}
                             </div>
                             {lastMessageTime && (
@@ -927,7 +1052,7 @@ export function PrivateDashboard() {
                     {/* View Switcher - Standard window scrolling on mobile for stability */}
                     <main className="flex-1 overflow-x-hidden overflow-y-auto lg:overflow-hidden p-2">
                         {activeView === "dashboard" ? (
-                            <div className="flex flex-col lg:grid lg:h-full lg:grid-cols-[36%_32%_32%] lg:grid-rows-[35%_35%_30%] gap-4 lg:gap-2">
+                            <div className="flex flex-col lg:grid lg:h-full lg:grid-cols-[38%_31%_31%] lg:grid-rows-[35%_35%_30%] gap-4 lg:gap-2">
 
                                 {/* Top Left: Borewell Monitor */}
                                 <div className="lg:col-start-1 lg:row-start-1 min-h-[250px] lg:min-h-0">
@@ -937,12 +1062,26 @@ export function PrivateDashboard() {
                                         isMotorOn={isMotorOn}
                                         onMotorToggle={() => handleMotorToggle(activeBorewellIndex)}
                                         data={{
-                                            flowRate: isMotorOn ? rand(35 + activeBorewellIndex * 5, 55 + activeBorewellIndex * 5).toFixed(1) : 0,
-                                            efficiency: isMotorOn ? rand(68, 85).toFixed(0) : 0,
-                                            voltage: rand(228, 242).toFixed(0),
-                                            current: (activeBorewellIndex === 0 ? (waterData?.irms || 8.4) : rand(4, 9)).toFixed(1),
-                                            runTime: (motorRunTime / 3600).toFixed(2),
-                                            liters: isMotorOn ? (800 + activeBorewellIndex * 100).toString() : "0"
+                                            flowRate: isMotorOn
+                                                ? Number(safeWaterData.flowRate || (demoMode ? rand(35 + activeBorewellIndex * 5, 55 + activeBorewellIndex * 5) : 0)).toFixed(1)
+                                                : "0.0",
+                                            efficiency: isMotorOn
+                                                ? Number(safeWaterData.efficiency || (demoMode ? Math.min(95, Math.max(40, Math.round(((safeWaterData.flowRate || 45) * 15) / (safeWaterData.irms || 8.4)))) : 0)).toFixed(0)
+                                                : "0",
+                                            voltage: isMotorOn
+                                                ? Number(safeWaterData.voltage || (demoMode ? rand(228, 242) : 0)).toFixed(0)
+                                                : "0",
+                                            current: isMotorOn
+                                                ? Number(safeWaterData.irms || (demoMode ? rand(7.8, 9.2) : 0)).toFixed(1)
+                                                : "0.0",
+                                            runTime: Number(safeWaterData.runTime || 0).toFixed(2),
+                                            liters: (safeWaterData.totalLiters !== undefined && safeWaterData.totalLiters !== null)
+                                                ? Number(safeWaterData.totalLiters).toFixed(1)
+                                                : (demoMode && isMotorOn
+                                                    ? (safeWaterData.flowRate
+                                                        ? Number(safeWaterData.flowRate * (motorRunTime / 60)).toFixed(0)
+                                                        : (800 + activeBorewellIndex * 100).toString())
+                                                    : "0.0")
                                         }}
                                     />
                                 </div>
@@ -951,13 +1090,14 @@ export function PrivateDashboard() {
                                     <WaterAnalysisSplit
                                         waterData={{
                                             ...safeWaterData,
-                                            level: borewells[activeBorewellIndex].isMotorOn ? rand(4.2, 5.8) : rand(1.2, 2.5),
-                                            irms: borewells[activeBorewellIndex].isMotorOn ? rand(7.8, 9.2) : 0,
-                                            tds: rand(210, 240),
-                                            ph: rand(6.8, 7.4)
+                                            level: safeWaterData.level || (demoMode ? (isMotorOn ? rand(4.2, 5.8) : rand(1.2, 2.5)) : 0),
+                                            irms: safeWaterData.irms || (demoMode ? (isMotorOn ? rand(7.8, 9.2) : 0) : 0),
+                                            tds: safeWaterData.tds || (demoMode ? rand(210, 240) : 0),
+                                            ph: safeWaterData.ph || (demoMode ? rand(6.8, 7.4) : 0),
+                                            turbidity: safeWaterData.turbidity || (demoMode ? rand(0.8, 1.8) : 0)
                                         }}
                                         maxWaterLevel={10}
-                                        waterStatus={borewells[activeBorewellIndex].isMotorOn ? "ACTIVE" : "STANDBY"}
+                                        waterStatus={isMotorOn ? "ACTIVE" : "STANDBY"}
                                     />
                                 </div>
 
@@ -977,24 +1117,38 @@ export function PrivateDashboard() {
                                 {/* ═══ ROW 2: THE TRENDS ═══ */}
                                 {/* Middle Left: Borewell System Health Index (Radar) */}
                                 <div className="lg:col-start-1 lg:row-start-2 overflow-hidden min-h-[300px] lg:min-h-0">
-                                    <BorewellHealthIndex leakStatus={isMotorOn ? "Nominal" : "Standby"} />
+                                    <BorewellHealthIndex
+                                        waterData={safeWaterData}
+                                        isMotorOn={isMotorOn}
+                                        leakStatus={isMotorOn ? "Nominal" : "Standby"}
+                                        isOffline={isWaterOffline}
+                                    />
                                 </div>
 
                                 <div className="lg:col-start-2 lg:row-start-2 overflow-hidden min-h-[350px] lg:min-h-0">
                                     <WaterQualityCard
                                         data={{
                                             ...safeWaterData,
-                                            chartData: {
-                                                labels: Array(24).fill(0).map((_, i) => `${i}:00`),
-                                                level: Array(24).fill(0).map(() => rand(40, 50)),
-                                                ph: Array(24).fill(0).map(() => rand(6.8, 7.5)),
-                                                tds: Array(24).fill(0).map(() => rand(200, 230))
-                                            }
+                                            chartData: (safeWaterData.chartData && safeWaterData.chartData.labels && safeWaterData.chartData.labels.length > 0)
+                                                ? safeWaterData.chartData
+                                                : (demoMode ? {
+                                                    labels: Array(24).fill(0).map((_, i) => `${i}:00`),
+                                                    level: Array(24).fill(0).map(() => rand(40, 50)),
+                                                    ph: Array(24).fill(0).map(() => rand(6.8, 7.5)),
+                                                    tds: Array(24).fill(0).map(() => rand(200, 230)),
+                                                    turbidity: Array(24).fill(0).map(() => rand(0.8, 1.8))
+                                                } : {
+                                                    labels: [],
+                                                    level: [],
+                                                    ph: [],
+                                                    tds: [],
+                                                    turbidity: []
+                                                })
                                         }}
                                         activeMetric={selectedWaterMetric}
                                         onMetricSelect={handleWaterTileClick}
                                         onExpand={() => setModalConfig({ isOpen: true, type: 'water' })}
-                                        isOffline={false}
+                                        isOffline={isWaterOffline}
                                         mode="line-only"
                                         timeRange={timeRange}
                                         onTimeRangeChange={setTimeRange}
@@ -1022,7 +1176,7 @@ export function PrivateDashboard() {
                                         data={safeAirData}
                                         activeMetric={selectedPollutant}
                                         onMetricSelect={handleTileClick}
-                                        isOffline={false}
+                                        isOffline={isAirOffline}
                                         mode="compact"
                                         timeRange={timeRange}
                                         onTimeRangeChange={setTimeRange}
@@ -1034,12 +1188,22 @@ export function PrivateDashboard() {
                                     <div className="relative flex h-full flex-col rounded-xl bg-slate-900/40 backdrop-blur-md lg:backdrop-blur-xl border border-white/5 p-3 overflow-hidden">
                                         <h3 className="mb-2 text-[10px] font-bold uppercase tracking-[0.15em] text-slate-400 border-b border-white/5 pb-1 shrink-0">Sensor Status</h3>
                                         <div className="flex flex-col gap-1.5 flex-1 min-h-0 overflow-y-auto scrollbar-thin scrollbar-thumb-white/10">
-                                            {(myDevices.length > 0 ? myDevices : [
-                                                { device_id: "BW-GW-01", type: "GATEWAY", status: "ONLINE" },
-                                                { device_id: "BW-NODE-01", type: "SENSOR", status: "ONLINE" },
-                                                { device_id: "AQI-NODE-01", type: "SENSOR", status: "ONLINE" },
-                                                { device_id: "LORA-HUB", type: "BASE", status: "ONLINE" }
-                                            ]).map((dev) => (
+                                            {(() => {
+                                                const now = currentTime;
+                                                const isWaterOnline = wsConnected && lastWaterTime > 0 && (now - lastWaterTime < 300000);
+                                                const isAirOnline = wsConnected && lastAirTime > 0 && (now - lastAirTime < 300000);
+                                                const isLoraHubOnline = isWaterOnline && isAirOnline ? true : (isAirOnline ? false : (isWaterOnline ? true : false));
+                                                const isGwOnline = isWaterOnline && isAirOnline ? true : (isAirOnline ? false : (isWaterOnline ? true : false));
+                                                const isWaterNodeOnline = isWaterOnline && isAirOnline ? true : (isAirOnline ? false : (isWaterOnline ? true : false));
+                                                const isAqiNodeOnline = isWaterOnline && isAirOnline ? true : (isAirOnline ? true : (isWaterOnline ? false : false));
+
+                                                return [
+                                                    { device_id: "BW-GW-01", type: "GATEWAY", status: isGwOnline ? "ONLINE" : "OFFLINE" },
+                                                    { device_id: "BW-NODE-01", type: "SENSOR", status: isWaterNodeOnline ? "ONLINE" : "OFFLINE" },
+                                                    { device_id: "AQI-NODE-01", type: "SENSOR", status: isAqiNodeOnline ? "ONLINE" : "OFFLINE" },
+                                                    { device_id: "LORA-HUB", type: "BASE", status: isLoraHubOnline ? "ONLINE" : "OFFLINE" }
+                                                ];
+                                            })().map((dev: any) => (
                                                 <div
                                                     key={dev.device_id}
                                                     className="w-full flex cursor-pointer items-center justify-between rounded-lg border border-white/5 bg-white/[0.03] px-3 py-2 transition-all hover:bg-white/[0.06] group"
@@ -1069,7 +1233,13 @@ export function PrivateDashboard() {
 
                                 {/* Bottom Right: AI Summarizer (Fixed) */}
                                 <div className="lg:col-start-3 lg:row-start-3 h-full flex flex-col overflow-hidden min-h-[250px] lg:min-h-0">
-                                    <AiSummarizerCard />
+                                    <AiSummarizerCard
+                                        waterData={safeWaterData}
+                                        isMotorOn={isMotorOn}
+                                        airData={safeAirData}
+                                        isWaterOffline={isWaterOffline}
+                                        isAirOffline={isAirOffline}
+                                    />
                                 </div>
 
                             </div>
@@ -1141,6 +1311,8 @@ export function PrivateDashboard() {
                     selectedWaterMetric={selectedWaterMetric}
                     onWaterMetricSelect={handleWaterTileClick}
                     isMotorOn={isMotorOn}
+                    timeRange={timeRange}
+                    onTimeRangeChange={setTimeRange}
                 />
 
                 <RecentReadingsExpandModal

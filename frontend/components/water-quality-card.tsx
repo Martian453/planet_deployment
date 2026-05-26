@@ -23,6 +23,10 @@ interface WaterQualityData {
   level: number
   ph: number
   tds: number
+  waterStatus?: string
+  tdsStatus?: string
+  turbidity?: number
+  turbidityStatus?: string
   chartData: {
     labels: string[]
     level: number[]
@@ -67,6 +71,7 @@ export function WaterQualityCard({
     level: 0,
     ph: 0,
     tds: 0,
+    turbidity: 0,
   })
 
   useEffect(() => {
@@ -87,6 +92,7 @@ export function WaterQualityCard({
         level: startValues.level + (data.level - startValues.level) * eased,
         ph: startValues.ph + (data.ph - startValues.ph) * eased,
         tds: startValues.tds + (data.tds - startValues.tds) * eased,
+        turbidity: startValues.turbidity + ((data.turbidity !== undefined ? data.turbidity : 1.2) - startValues.turbidity) * eased,
       })
 
       if (progress < 1) requestAnimationFrame(animate)
@@ -94,15 +100,15 @@ export function WaterQualityCard({
 
     animate()
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [data.level, data.ph, data.tds])
+  }, [data.level, data.ph, data.tds, data.turbidity])
 
   // ==========================================
   // STATIC BAR CHART PREPARATION (OLD STYLE)
   // ==========================================
   /* Short labels so x-axis fits without clipping in tight tiles */
-  const allLabels = ["Level", "pH", "TDS"]
-  const allLineData = [animatedValues.level, animatedValues.ph, animatedValues.tds]
-  const allBarData = [animatedValues.level, animatedValues.ph, animatedValues.tds]
+  const allLabels = ["Level", "pH", "TDS", "Turbidity"]
+  const allLineData = [animatedValues.level, animatedValues.ph, animatedValues.tds, animatedValues.turbidity]
+  const allBarData = [animatedValues.level, animatedValues.ph, animatedValues.tds, animatedValues.turbidity]
 
   const barChartData = {
     labels: allLabels,
@@ -119,6 +125,7 @@ export function WaterQualityCard({
           (activeMetric === null || activeMetric === "level" || hoveredMetric === "level") ? "rgba(143, 211, 255, 1)" : "rgba(143, 211, 255, 0.1)",
           (activeMetric === null || activeMetric === "ph" || hoveredMetric === "ph") ? "rgba(124, 255, 154, 1)" : "rgba(124, 255, 154, 0.1)",
           (activeMetric === null || activeMetric === "tds" || hoveredMetric === "tds") ? "rgba(255, 211, 106, 1)" : "rgba(255, 211, 106, 0.1)",
+          (activeMetric === null || activeMetric === "turbidity" || hoveredMetric === "turbidity") ? "rgba(168, 85, 247, 1)" : "rgba(168, 85, 247, 0.1)",
         ],
         pointBorderColor: "#0f172a",
         pointBorderWidth: 2,
@@ -132,9 +139,10 @@ export function WaterQualityCard({
           (activeMetric === null || activeMetric === "level" || hoveredMetric === "level") ? "rgba(6, 182, 212, 1)" : "rgba(6, 182, 212, 0.1)",
           (activeMetric === null || activeMetric === "ph" || hoveredMetric === "ph") ? "rgba(34, 197, 94, 1)" : "rgba(34, 197, 94, 0.1)",
           (activeMetric === null || activeMetric === "tds" || hoveredMetric === "tds") ? "rgba(251, 191, 36, 1)" : "rgba(251, 191, 36, 0.1)",
+          (activeMetric === null || activeMetric === "turbidity" || hoveredMetric === "turbidity") ? "rgba(168, 85, 247, 1)" : "rgba(168, 85, 247, 0.1)",
         ],
         borderRadius: 8,
-        barThickness: 50,
+        barThickness: 35,
         order: 1,
       }
     ]
@@ -196,6 +204,7 @@ export function WaterQualityCard({
     level: { label: "Water Level", color: "rgb(34, 211, 238)", bgColor: "rgba(34, 211, 238, 0.1)", unit: "ft" },
     ph: { label: "pH Level", color: "rgb(74, 222, 128)", bgColor: "rgba(74, 222, 128, 0.1)", unit: "" },
     tds: { label: "TDS", color: "rgb(251, 191, 36)", bgColor: "rgba(251, 191, 36, 0.1)", unit: "ppm" },
+    turbidity: { label: "Turbidity", color: "rgb(168, 85, 247)", bgColor: "rgba(168, 85, 247, 0.1)", unit: "NTU" },
   }
   const cfg = metricConfig[chartMetric] || metricConfig.level
 
@@ -203,24 +212,30 @@ export function WaterQualityCard({
   // SIMULATION / HISTORY PREPARATION
   // ==========================================
   const simulatedHistory = useMemo(() => {
-    if (timeRange === "1h") {
+    const hasLiveHistory = data.chartData?.level && data.chartData.level.length >= 2;
+    if (hasLiveHistory) {
       const labels = (data.chartData?.labels || []).map(l => {
-        const d = new Date(l)
-        return !isNaN(d.getTime()) ? d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }) : l
+        const normalized = l.includes(' ') && !l.includes('T') ? l.replace(' ', 'T') + 'Z' : l;
+        const d = new Date(normalized);
+        return !isNaN(d.getTime()) ? d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }) : l;
       });
       return {
         labels,
         level: data.chartData?.level || [],
         ph: data.chartData?.ph || [],
         tds: data.chartData?.tds || [],
+        turbidity: data.chartData?.turbidity || []
       };
     }
 
-    // Generate simulated history for 24h / 7d
-    const count = timeRange === "24h" ? 100 : 300;
-    const labels = generateTimeLabels(timeRange, count).map(l => new Date(l).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }));
-    return generateWaterHistory(data, timeRange, isMotorOn, count, labels);
-  }, [data, timeRange, isMotorOn]);
+    return {
+      labels: [],
+      level: [],
+      ph: [],
+      tds: [],
+      turbidity: []
+    };
+  }, [data]);
 
   const timeLabels = simulatedHistory.labels;
   const chartValues = (simulatedHistory as any)?.[chartMetric] || [];
@@ -230,7 +245,7 @@ export function WaterQualityCard({
     datasets: mode === "line-only" ? [
       {
         label: "Water Level (ft)",
-        data: (data.chartData as any)?.level || [],
+        data: simulatedHistory.level,
         borderColor: "rgb(34, 211, 238)",
         backgroundColor: "rgba(34, 211, 238, 0.05)",
         borderWidth: 2,
@@ -239,10 +254,11 @@ export function WaterQualityCard({
         pointRadius: 0,
         pointHoverRadius: 5,
         pointBackgroundColor: "rgb(34, 211, 238)",
+        yAxisID: 'yLevel',
       },
       {
         label: "pH Level",
-        data: (data.chartData as any)?.ph || [],
+        data: simulatedHistory.ph,
         borderColor: "rgb(74, 222, 128)",
         backgroundColor: "rgba(74, 222, 128, 0.05)",
         borderWidth: 2,
@@ -251,10 +267,11 @@ export function WaterQualityCard({
         pointRadius: 0,
         pointHoverRadius: 5,
         pointBackgroundColor: "rgb(74, 222, 128)",
+        yAxisID: 'yLevel',
       },
       {
         label: "TDS (ppm)",
-        data: (data.chartData as any)?.tds || [],
+        data: simulatedHistory.tds,
         borderColor: "rgb(251, 191, 36)",
         backgroundColor: "rgba(251, 191, 36, 0.05)",
         borderWidth: 2,
@@ -263,6 +280,7 @@ export function WaterQualityCard({
         pointRadius: 0,
         pointHoverRadius: 5,
         pointBackgroundColor: "rgb(251, 191, 36)",
+        yAxisID: 'yTDS',
       }
     ] : [
       {
@@ -271,7 +289,7 @@ export function WaterQualityCard({
         borderColor: cfg.color,
         backgroundColor: cfg.bgColor,
         borderWidth: 2,
-        tension: 0.1, // Less smooth for water physics to look more "recharge" like if needed
+        tension: 0.1,
         fill: true,
         pointRadius: 0,
         pointHoverRadius: 5,
@@ -308,7 +326,41 @@ export function WaterQualityCard({
         displayColors: mode === "line-only",
       },
     },
-    scales: {
+    scales: mode === "line-only" ? {
+      x: {
+        ticks: { color: "#475569", font: { size: 9 }, maxTicksLimit: 6 },
+        grid: { display: false },
+        border: { display: false },
+      },
+      yLevel: {
+        type: 'linear' as const,
+        position: 'left' as const,
+        title: {
+          display: true,
+          text: 'Level (ft) / pH',
+          color: '#94a3b8',
+          font: { size: 8, weight: 'bold' }
+        },
+        ticks: { color: "#475569", font: { size: 9 } },
+        beginAtZero: true,
+        grid: { color: "rgba(148, 163, 184, 0.05)" },
+        border: { display: false },
+      },
+      yTDS: {
+        type: 'linear' as const,
+        position: 'right' as const,
+        title: {
+          display: true,
+          text: 'TDS (ppm)',
+          color: '#94a3b8',
+          font: { size: 8, weight: 'bold' }
+        },
+        ticks: { color: "#475569", font: { size: 9 } },
+        beginAtZero: true,
+        grid: { drawOnChartArea: false },
+        border: { display: false },
+      }
+    } : {
       x: {
         ticks: { color: "#475569", font: { size: 9 }, maxTicksLimit: 6 },
         grid: { display: false },
@@ -345,7 +397,7 @@ export function WaterQualityCard({
       key: "ph",
       label: "pH Level",
       value: animatedValues.ph.toFixed(1),
-      range: "Within 6.5 - 8.5",
+      range: data.waterStatus ? `Status: ${data.waterStatus}` : "Within 6.5 - 8.5",
       color: "text-emerald-400",
       hoverColor: "text-emerald-300",
       glow: "drop-shadow-[0_0_10px_rgba(124,255,154,0.5)]",
@@ -354,27 +406,34 @@ export function WaterQualityCard({
     {
       key: "tds",
       label: "TDS",
-      value: animatedValues.tds.toFixed(1),
+      value: animatedValues.tds.toFixed(0),
       unit: "ppm",
+      range: data.tdsStatus ? `Status: ${data.tdsStatus}` : "Within 0 - 300",
       color: "text-amber-400",
       hoverColor: "text-amber-300",
       glow: "drop-shadow-[0_0_10px_rgba(255,211,106,0.5)]",
       bgGlow: "shadow-[0_0_25px_rgba(255,211,106,0.3)]"
+    },
+    {
+      key: "turbidity",
+      label: "Turbidity",
+      value: animatedValues.turbidity.toFixed(1),
+      unit: "NTU",
+      range: data.turbidityStatus ? `Status: ${data.turbidityStatus}` : "Clear (< 200)",
+      color: "text-purple-400",
+      hoverColor: "text-purple-300",
+      glow: "drop-shadow-[0_0_10px_rgba(168,85,247,0.5)]",
+      bgGlow: "shadow-[0_0_25px_rgba(168,85,247,0.3)]"
     },
   ]
 
   return (
     <div
       className={`${transparent ? '' : 'relative h-full w-full overflow-hidden rounded-2xl border border-white/5 bg-slate-900/40 p-3 backdrop-blur-xl hover:shadow-[0_0_30px_rgba(6,182,212,0.1)]'} group flex min-h-0 flex-col transition-all duration-200 ${isVisible ? "opacity-100" : "opacity-0"
-        } ${isOffline ? 'opacity-50 blur-[2px] pointer-events-none' : 'cursor-pointer'}`}
+        } cursor-pointer`}
       style={{ transitionDelay: "100ms" }}
       onClick={onExpand}
     >
-      {isOffline && (
-        <div className="absolute top-4 right-12 z-50 bg-red-500 text-white text-[10px] font-bold px-2 py-0.5 rounded-full animate-pulse">
-          OFFLINE
-        </div>
-      )}
       {/* Animated background - removed to match Yearly Comparison style */}
 
       {!transparent && (
@@ -422,7 +481,7 @@ export function WaterQualityCard({
       )}
 
       {/* Metrics Grid — hidden in bar-only / line-only modes */}
-      {showTiles && <div className={`relative z-10 mt-3 mb-2 grid grid-cols-3 gap-1.5`}>
+      {showTiles && <div className={`relative z-10 mt-3 mb-2 grid grid-cols-2 sm:grid-cols-4 gap-1.5`}>
         {metrics.map((m, i) => (
           <div
             key={m.label}

@@ -22,73 +22,153 @@ interface MaintenanceItem {
   value?: string
 }
 
-export function BorewellHealthIndex({ leakStatus = "Nominal" }: { leakStatus?: string }) {
-  // ── BSHI Calculation ──────────────────────────────────────
-  // In production, these values would come from sensor data props.
-  // Weights: Mechanical (35%), Hydrological (35%), Bio-Chemical (30%)
-  const pillars: HealthPillar[] = useMemo(() => [
-    {
-      label: "Mechanical",
-      score: 92,
-      icon: <Zap className="h-3 w-3" />,
-      color: "#10b981",
-      glowColor: "rgba(16, 185, 129, 0.4)",
-      status: "NOMINAL",
-    },
-    {
-      label: "Hydrological",
-      score: 78,
-      icon: <Droplets className="h-3 w-3" />,
-      color: "#f59e0b",
-      glowColor: "rgba(245, 158, 11, 0.4)",
-      status: "CAUTION",
-    },
-    {
-      label: "Bio-Chemical",
-      score: 88,
-      icon: <FlaskConical className="h-3 w-3" />,
-      color: "#10b981",
-      glowColor: "rgba(16, 185, 129, 0.4)",
-      status: "NOMINAL",
-    },
-  ], [])
+interface BorewellHealthIndexProps {
+  waterData?: {
+    level: number
+    ph: number
+    tds: number
+    irms?: number
+    flowRate?: number
+    efficiency?: number
+    turbidity?: number
+  }
+  isMotorOn?: boolean
+  leakStatus?: string
+  isOffline?: boolean
+}
+
+export function BorewellHealthIndex({ 
+  waterData, 
+  isMotorOn = false, 
+  leakStatus = "Nominal",
+  isOffline = false
+}: BorewellHealthIndexProps) {
+
+  // Extract variables safely
+  const level = waterData?.level ?? 4.5;
+  const ph = waterData?.ph ?? 7.2;
+  const tds = waterData?.tds ?? 250;
+  const flowRate = waterData?.flowRate ?? 0;
+  const efficiency = waterData?.efficiency ?? 75;
+  const turbidity = waterData?.turbidity ?? 1.2;
+
+  // ── Health Pillars Calculations ──────────────────────────────
+  const pillars: HealthPillar[] = useMemo(() => {
+    // 1. Mechanical Health: Based on motor status, current efficiency and active state
+    // Normal efficiency target is 65-90%. If motor is off, we default to 95 (nominal standby status).
+    const mechanicalScore = isMotorOn 
+      ? (efficiency > 0 ? Math.min(100, Math.max(30, Math.round(efficiency))) : 85)
+      : 95;
+    
+    const mechanicalStatus = mechanicalScore >= 80 ? "NOMINAL" : mechanicalScore >= 60 ? "CAUTION" : "CRITICAL";
+    const mechanicalColor = mechanicalStatus === "NOMINAL" ? "#10b981" : mechanicalStatus === "CAUTION" ? "#f59e0b" : "#ef4444";
+    const mechanicalGlow = mechanicalStatus === "NOMINAL" ? "rgba(16, 185, 129, 0.4)" : mechanicalStatus === "CAUTION" ? "rgba(245, 158, 11, 0.4)" : "rgba(239, 68, 68, 0.4)";
+
+    // 2. Hydrological Health: Water Level (optimal > 3.5ft) and Flow rate stability
+    const levelScore = Math.min(100, Math.max(10, (level / 6.0) * 100));
+    const flowScore = isMotorOn ? Math.min(100, Math.max(10, (flowRate / 45.0) * 100)) : 90;
+    const hydrologicalScore = Math.round((levelScore + flowScore) / 2);
+    
+    const hydrologicalStatus = hydrologicalScore >= 75 ? "NOMINAL" : hydrologicalScore >= 55 ? "CAUTION" : "CRITICAL";
+    const hydrologicalColor = hydrologicalStatus === "NOMINAL" ? "#10b981" : hydrologicalStatus === "CAUTION" ? "#f59e0b" : "#ef4444";
+    const hydrologicalGlow = hydrologicalStatus === "NOMINAL" ? "rgba(16, 185, 129, 0.4)" : hydrologicalStatus === "CAUTION" ? "rgba(245, 158, 11, 0.4)" : "rgba(239, 68, 68, 0.4)";
+
+    // 3. Bio-Chemical Health: pH balance (ideal 7.2), TDS levels (ideal < 300), Turbidity (ideal < 2.0 NTU)
+    const phScore = Math.max(0, 100 - Math.abs(7.2 - ph) * 45);
+    const tdsScore = Math.max(0, 100 - Math.max(0, tds - 300) * 0.15);
+    const turbidityScore = Math.max(0, 100 - turbidity * 8);
+    const biochemicalScore = Math.round((phScore + tdsScore + turbidityScore) / 3);
+
+    const biochemicalStatus = biochemicalScore >= 80 ? "NOMINAL" : biochemicalScore >= 60 ? "CAUTION" : "CRITICAL";
+    const biochemicalColor = biochemicalStatus === "NOMINAL" ? "#10b981" : biochemicalStatus === "CAUTION" ? "#f59e0b" : "#ef4444";
+    const biochemicalGlow = biochemicalStatus === "NOMINAL" ? "rgba(16, 185, 129, 0.4)" : biochemicalStatus === "CAUTION" ? "rgba(245, 158, 11, 0.4)" : "rgba(239, 68, 68, 0.4)";
+
+    return [
+      {
+        label: "Mechanical",
+        score: mechanicalScore,
+        icon: <Zap className="h-3 w-3" />,
+        color: mechanicalColor,
+        glowColor: mechanicalGlow,
+        status: mechanicalStatus,
+      },
+      {
+        label: "Hydrological",
+        score: hydrologicalScore,
+        icon: <Droplets className="h-3 w-3" />,
+        color: hydrologicalColor,
+        glowColor: hydrologicalGlow,
+        status: hydrologicalStatus,
+      },
+      {
+        label: "Bio-Chemical",
+        score: biochemicalScore,
+        icon: <FlaskConical className="h-3 w-3" />,
+        color: biochemicalColor,
+        glowColor: biochemicalGlow,
+        status: biochemicalStatus,
+      },
+    ];
+  }, [level, ph, tds, flowRate, efficiency, turbidity, isMotorOn]);
 
   const overallScore = useMemo(() => {
     return Math.round(pillars[0].score * 0.35 + pillars[1].score * 0.35 + pillars[2].score * 0.30)
   }, [pillars])
 
-  const verdictLabel = overallScore >= 85 ? "OPTIMAL" : overallScore >= 65 ? "CAUTION" : "CRITICAL"
-  const verdictColor = overallScore >= 85 ? "text-emerald-400" : overallScore >= 65 ? "text-amber-400" : "text-red-400"
-  const verdictBg = overallScore >= 85 ? "bg-emerald-500/10 border-emerald-500/20" : overallScore >= 65 ? "bg-amber-500/10 border-amber-500/20" : "bg-red-500/10 border-red-500/20"
+  const verdictLabel = overallScore >= 80 ? "OPTIMAL" : overallScore >= 60 ? "CAUTION" : "CRITICAL"
+  const verdictColor = overallScore >= 80 ? "text-emerald-400" : overallScore >= 60 ? "text-amber-400" : "text-red-400"
+  const verdictBg = overallScore >= 80 ? "bg-emerald-500/10 border-emerald-500/20" : overallScore >= 60 ? "bg-amber-500/10 border-amber-500/20" : "bg-red-500/10 border-red-500/20"
 
   // ── Maintenance Predictions ───────────────────────────────
-  const maintenance: MaintenanceItem[] = useMemo(() => [
-    {
-      label: "Pump Service",
-      daysLeft: 45,
-      icon: <Wrench className="h-3 w-3 text-slate-400" />,
-      urgency: 'low' as const,
-    },
-    {
-      label: "Filter Change",
-      daysLeft: 12,
-      icon: <Timer className="h-3 w-3 text-amber-400" />,
-      urgency: 'medium' as const,
-    },
-    {
-      label: "Leak Detection",
-      value: leakStatus,
-      icon: <Droplets className={`h-3 w-3 ${leakStatus === 'Nominal' ? 'text-emerald-400' : 'text-slate-400'}`} />,
-      urgency: (leakStatus === 'Nominal' ? 'low' : 'medium') as any,
-    },
-  ], [leakStatus])
+  const maintenance: MaintenanceItem[] = useMemo(() => {
+    // Estimate pump service days left based on mechanical health
+    const pumpServiceDays = Math.max(5, Math.round((pillars[0].score / 100) * 50));
+    // Estimate filter change days based on turbidity/tds chemical health
+    const filterChangeDays = Math.max(2, Math.round((pillars[2].score / 100) * 15));
+
+    return [
+      {
+        label: "Pump Service",
+        daysLeft: pumpServiceDays,
+        icon: <Wrench className="h-3 w-3 text-slate-400" />,
+        urgency: pumpServiceDays < 15 ? 'high' : pumpServiceDays < 30 ? 'medium' : 'low',
+      },
+      {
+        label: "Filter Change",
+        daysLeft: filterChangeDays,
+        icon: <Timer className={`h-3 w-3 ${filterChangeDays < 5 ? 'text-red-400' : 'text-amber-400'}`} />,
+        urgency: filterChangeDays < 5 ? 'high' : filterChangeDays < 10 ? 'medium' : 'low',
+      },
+      {
+        label: "Leak Detection",
+        value: leakStatus,
+        icon: <Droplets className={`h-3 w-3 ${leakStatus === 'Nominal' ? 'text-emerald-400' : 'text-slate-400'}`} />,
+        urgency: (leakStatus === 'Nominal' ? 'low' : 'medium') as any,
+      },
+    ];
+  }, [pillars, leakStatus]);
 
   // ── Helper: Get bar color based on score ──────────────────
   const getBarGradient = (score: number) => {
-    if (score >= 85) return "from-emerald-500 to-emerald-400"
-    if (score >= 65) return "from-amber-500 to-amber-400"
+    if (score >= 80) return "from-emerald-500 to-emerald-400"
+    if (score >= 60) return "from-amber-500 to-amber-400"
     return "from-red-500 to-red-400"
   }
+
+  // Generate diagnostic description dynamically
+  const diagnosticText = useMemo(() => {
+    if (verdictLabel === "OPTIMAL") {
+      return "Hydraulic stable. Aquifer recharge within normal parameters. Chemical draw nominal.";
+    } else if (verdictLabel === "CAUTION") {
+      const issues = [];
+      if (pillars[0].score < 80) issues.push("low motor efficiency");
+      if (pillars[1].score < 80) issues.push("aquifer drawdown");
+      if (pillars[2].score < 80) issues.push("chemical deviation");
+      return `System caution. Detected ${issues.join(" and ") || "minor variations"}. Monitor performance.`;
+    } else {
+      return "Critical Alert: Imminent pump dry run danger or severe chemical contamination detected!";
+    }
+  }, [verdictLabel, pillars]);
 
   return (
     <div className="relative flex h-full flex-col overflow-hidden rounded-xl bg-[rgba(6,10,30,0.5)] backdrop-blur-xl border border-white/5 p-3 group shadow-[0_6px_24px_rgba(0,0,0,0.35),inset_0_1px_0_rgba(255,255,255,0.05)]">
@@ -196,11 +276,13 @@ export function BorewellHealthIndex({ leakStatus = "Nominal" }: { leakStatus?: s
 
       {/* ── DIAGNOSIS FOOTER ─────────────────────────────── */}
       <div className="mt-2 flex items-center gap-2 rounded-lg bg-white/[0.03] px-2 py-1.5 relative z-10 border border-white/[0.04]">
-        <div className="flex h-1.5 w-1.5 rounded-full bg-emerald-400 animate-pulse flex-shrink-0" />
+        <div className={`flex h-1.5 w-1.5 rounded-full animate-pulse flex-shrink-0 ${verdictLabel === 'OPTIMAL' ? 'bg-emerald-400' : verdictLabel === 'CAUTION' ? 'bg-amber-400' : 'bg-red-400'}`} />
         <p className="text-[9px] font-medium text-slate-400 leading-tight flex-1">
-          <span className="text-white font-bold">Hydraulic stable.</span> Aquifer recharge within ±5%. Chemical draw nominal.
+          <span className="text-white font-bold">{verdictLabel === 'OPTIMAL' ? 'Hydraulic stable.' : verdictLabel === 'CAUTION' ? 'System alert.' : 'Critical error.'}</span> {diagnosticText}
         </p>
-        <span className="text-[9px] text-blue-400 font-mono font-bold uppercase flex-shrink-0">Live</span>
+        <span className={`text-[9px] font-mono font-bold uppercase flex-shrink-0 ${isOffline ? 'text-red-400' : 'text-blue-400'}`}>
+          {isOffline ? 'Offline' : 'Live'}
+        </span>
       </div>
 
       <style jsx>{`

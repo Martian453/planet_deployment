@@ -1,21 +1,17 @@
 import React from "react"
 import type { Metadata } from 'next'
-import { Exo_2, Space_Grotesk } from 'next/font/google'
 import { Analytics } from '@vercel/analytics/next'
 import './globals.css'
 import { ThemeProvider } from "@/components/theme-provider"
 
-const exo2 = Exo_2({
-  subsets: ["latin"],
-  weight: ["300", "400", "500", "600", "700", "800"],
+const exo2 = {
+  className: "font-sans",
   variable: "--font-exo2"
-});
+};
 
-const spaceGrotesk = Space_Grotesk({
-  subsets: ["latin"],
-  weight: ["300", "400", "500", "600", "700"],
-  variable: "--font-space-grotesk",
-});
+const spaceGrotesk = {
+  variable: "--font-space-grotesk"
+};
 
 export const metadata: Metadata = {
   title: 'Air & Groundwater Intelligence Dashboard',
@@ -50,6 +46,10 @@ export default function RootLayout({
   return (
     <html lang="en" suppressHydrationWarning>
       <head>
+        {/* Google Fonts loaded in browser to avoid Next.js compiler download blocks */}
+        <link rel="preconnect" href="https://fonts.googleapis.com" />
+        <link rel="preconnect" href="https://fonts.gstatic.com" crossOrigin="" />
+        <link href="https://fonts.googleapis.com/css2?family=Exo+2:ital,wght@0,300..800;1,300..800&family=Space+Grotesk:wght@300..700&display=swap" rel="stylesheet" />
         {/* Leaflet CSS — must be in global head for reliable tile rendering */}
         <link
           rel="stylesheet"
