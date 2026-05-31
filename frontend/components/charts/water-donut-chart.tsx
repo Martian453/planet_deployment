@@ -6,7 +6,7 @@ import {
     Cell,
     ResponsiveContainer,
 } from "recharts"
-import { useState, useMemo } from "react"
+import { useState, useMemo, useEffect } from "react"
 
 interface WaterDonutChartProps {
     waterData?: {
@@ -26,6 +26,13 @@ interface WaterDonutChartProps {
 
 export function WaterDonutChart({ waterData, transparent = false }: WaterDonutChartProps) {
     const [activeIndex, setActiveIndex] = useState(0)
+
+    useEffect(() => {
+        const interval = setInterval(() => {
+            setActiveIndex((prev) => (prev + 1) % 4)
+        }, 5000)
+        return () => clearInterval(interval)
+    }, [])
 
     const data = useMemo(() => {
         if (!waterData) return [
@@ -88,15 +95,15 @@ export function WaterDonutChart({ waterData, transparent = false }: WaterDonutCh
         <div className={`${transparent ? '' : 'card-vibrant bg-slate-900/40 rounded-2xl border border-blue-500/20 p-3'} h-full min-h-[160px] w-full flex flex-col backdrop-blur-md lg:backdrop-blur-xl relative overflow-hidden group`}>
             <div className="flex-1 w-full flex flex-col items-center justify-between min-h-0 relative z-10">
                 {/* Donut Chart Container (Centered) */}
-                <div className="relative w-full h-[62%] min-h-[105px]">
+                <div className="relative w-full h-[66%] min-h-[112px] mt-1.5">
                     {/* Center Text */}
-                    <div className="absolute inset-0 flex flex-col items-center justify-center pointer-events-none z-10">
-                        <span className="text-xl font-bold text-white drop-shadow-[0_0_10px_rgba(0,0,0,0.5)] transition-transform duration-500">
+                    <div className="absolute inset-0 flex flex-col items-center justify-center pointer-events-none z-10 translate-y-[2%]">
+                        <span className="text-2xl font-bold text-white drop-shadow-[0_0_10px_rgba(0,0,0,0.5)] transition-transform duration-500">
                             {activeItem.name === "pH Balance" || activeItem.name === "Turbidity" 
                                 ? activeItem.rawValue.toFixed(1) 
                                 : Math.round(activeItem.rawValue)}
                         </span>
-                        <span className="text-[8px] uppercase font-black tracking-widest" style={{ color: activeItem.color }}>
+                        <span className="text-[9px] uppercase font-black tracking-widest" style={{ color: activeItem.color }}>
                             {activeItem.unit}
                         </span>
                     </div>
@@ -105,15 +112,15 @@ export function WaterDonutChart({ waterData, transparent = false }: WaterDonutCh
                         <PieChart>
                             <Pie
                                 data={data}
-                                innerRadius={36}
-                                outerRadius={48}
+                                innerRadius={41}
+                                outerRadius={55}
                                 paddingAngle={4}
                                 dataKey="chartValue"
                                 onMouseEnter={onPieEnter}
                                 stroke="none"
                                 cornerRadius={6}
                                 cx="50%"
-                                cy="50%"
+                                cy="52%"
                             >
                                 {data.map((entry, index) => (
                                     <Cell
@@ -134,22 +141,17 @@ export function WaterDonutChart({ waterData, transparent = false }: WaterDonutCh
                     </ResponsiveContainer>
                 </div>
 
-                {/* Bottom Row Metrics Stack (Vertical items next to each other) */}
-                <div className="flex flex-row justify-between items-center w-full px-1 mt-2 gap-1 relative z-10 border-t border-white/[0.05] pt-2">
+                {/* Bottom Row Metrics Stack (Name and color dot only, no values) */}
+                <div className="flex flex-row flex-wrap justify-center items-center w-full px-1 mt-2 gap-x-4 gap-y-1 relative z-10 border-t border-white/[0.05] pt-2">
                     {data.map((entry, index) => (
                         <div
                             key={index}
-                            className={`flex flex-col items-center text-center cursor-pointer transition-all duration-300 flex-1 ${index === activeIndex ? "opacity-100 scale-105" : "opacity-50 hover:opacity-100"}`}
+                            className={`flex items-center gap-1.5 cursor-pointer transition-all duration-300 ${index === activeIndex ? "opacity-100 scale-105" : "opacity-50 hover:opacity-100"}`}
                             onMouseEnter={() => setActiveIndex(index)}
                         >
-                            <span className="text-[7px] font-black text-slate-500 uppercase tracking-tighter leading-none mb-1">
+                            <div className="w-1.5 h-1.5 rounded-full flex-shrink-0" style={{ backgroundColor: entry.color, boxShadow: `0 0 5px ${entry.color}` }} />
+                            <span className="text-[10px] font-black text-white/90 uppercase tracking-wider leading-none">
                                 {entry.name}
-                            </span>
-                            <span className="text-[10px] font-black font-mono text-white leading-none whitespace-nowrap">
-                                {entry.name === "pH Balance" || entry.name === "Turbidity" 
-                                    ? entry.rawValue.toFixed(1) 
-                                    : Math.round(entry.rawValue)}
-                                <span className="text-[6.5px] font-bold text-slate-400 ml-0.5">{entry.unit}</span>
                             </span>
                         </div>
                     ))}

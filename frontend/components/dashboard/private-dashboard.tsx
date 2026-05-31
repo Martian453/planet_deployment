@@ -76,6 +76,18 @@ export function PrivateDashboard() {
     const [selectedWaterMetric, setSelectedWaterMetric] = useState<string | null>(null);
     const [modalConfig, setModalConfig] = useState<{ isOpen: boolean; type: 'aqi' | 'water' | null }>({ isOpen: false, type: null });
     const [timeRange, setTimeRange] = useState<"1h" | "24h" | "7d">("1h");
+
+    useEffect(() => {
+        const ranges: Array<"1h" | "24h" | "7d"> = ["1h", "24h", "7d"];
+        const interval = setInterval(() => {
+            setTimeRange((current) => {
+                const nextIndex = (ranges.indexOf(current) + 1) % ranges.length;
+                return ranges[nextIndex];
+            });
+        }, 15000);
+        return () => clearInterval(interval);
+    }, []);
+
     const [readingsPeriod, setReadingsPeriod] = useState<HistoricalPeriod>("week")
     const [readingsModalOpen, setReadingsModalOpen] = useState(false)
     const [activeBorewellIndex, setActiveBorewellIndex] = useState(0);

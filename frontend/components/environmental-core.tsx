@@ -237,19 +237,19 @@ export function SpeedometerGauge({
       {/* Horizontal Info Bar at the Bottom */}
       <div className="flex flex-row justify-around items-center w-full px-2 mt-2 gap-2 relative z-10 border-t border-white/[0.05] pt-2">
         <div className="flex flex-col items-center text-center flex-1">
-          <span className="text-[7px] font-black text-slate-500 uppercase tracking-tighter leading-none mb-1">
+          <span className="text-[9px] font-black text-slate-400 uppercase tracking-tighter leading-none mb-1.5">
             IRMS
           </span>
-          <span className="text-[10px] font-black font-mono text-white leading-none whitespace-nowrap">
-            {safeIrms.toFixed(1)}<span className="text-[6.5px] font-bold text-slate-400 ml-0.5">A</span>
+          <span className="text-[13px] font-black font-mono text-white leading-none whitespace-nowrap">
+            {safeIrms.toFixed(1)}<span className="text-[8.5px] font-bold text-slate-400 ml-0.5">A</span>
           </span>
         </div>
         <div className="flex flex-col items-center text-center flex-1">
-          <span className="text-[7px] font-black text-slate-500 uppercase tracking-tighter leading-none mb-1">
+          <span className="text-[9px] font-black text-slate-400 uppercase tracking-tighter leading-none mb-1.5">
             Status
           </span>
           <span 
-            className="text-[10px] font-black uppercase tracking-tight leading-none whitespace-nowrap"
+            className="text-[13px] font-black uppercase tracking-tight leading-none whitespace-nowrap"
             style={{ color: activeZone.color }}
           >
             {activeStatus}
