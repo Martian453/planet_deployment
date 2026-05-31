@@ -167,7 +167,7 @@ export function AirQualityCard({ data, activeMetric, onMetricSelect, onExpand, i
         }
       }}
       onClick={onExpand}
-      className={`${transparent ? 'bg-transparent border-none p-0' : 'card-vibrant bg-slate-900/40 border ' + status.border + ' rounded-3xl ' + (compact ? 'p-1' : 'p-6') + ' backdrop-blur-md lg:backdrop-blur-xl'} relative overflow-hidden transition-all duration-200 lg:duration-1000 cursor-pointer hover:shadow-[0_0_30px_rgba(52,211,153,0.1)] active:scale-[0.99] flex flex-col ${transparent ? '' : 'h-full'} ${isVisible ? "opacity-100" : "opacity-0"}`}
+      className={`${transparent ? 'bg-transparent border-none p-0 flex-1 h-full' : 'card-vibrant bg-slate-900/40 border ' + status.border + ' rounded-3xl ' + (compact ? 'p-1' : 'p-6') + ' backdrop-blur-md lg:backdrop-blur-xl'} relative overflow-hidden transition-all duration-200 lg:duration-1000 cursor-pointer hover:shadow-[0_0_30px_rgba(52,211,153,0.1)] active:scale-[0.99] flex flex-col ${transparent ? 'flex-1 h-full' : 'h-full'} ${isVisible ? "opacity-100" : "opacity-0"}`}
     >
       {/* Background Glow - hidden on mobile for performance */}
       {!transparent && (
@@ -213,7 +213,7 @@ export function AirQualityCard({ data, activeMetric, onMetricSelect, onExpand, i
       )}
 
       {/* Interactive Grid of Pollutants */}
-      <div className={`grid ${compact ? 'grid-cols-3 gap-1.5' : 'grid-cols-2 gap-3 sm:grid-cols-3'}`}>
+      <div className={`grid ${compact ? 'grid-cols-3 gap-1.5 flex-1 min-h-0' : 'grid-cols-2 gap-3 sm:grid-cols-3 flex-1 min-h-0'}`}>
         {[
           { key: "pm25", label: "PM2.5", value: animatedValues.pm25.toFixed(1), unit: "µg/m³", bg: "bg-orange-500", glow: "group-hover:shadow-[0_0_8px_rgba(249,115,22,0.6)]" },
           { key: "pm10", label: "PM10", value: animatedValues.pm10.toFixed(1), unit: "µg/m³", bg: "bg-amber-400", glow: "group-hover:shadow-[0_0_8px_rgba(251,191,36,0.6)]" },

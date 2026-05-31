@@ -58,8 +58,8 @@ export function RecentReadingsTable({
   )
 
   return (
-    <div className="relative h-full w-full overflow-hidden rounded-2xl border border-white/5 bg-slate-900/40 p-2 backdrop-blur-xl">
-      <div className="mb-1 flex items-center justify-between gap-2">
+    <div className="relative h-full w-full overflow-hidden rounded-2xl border border-white/5 bg-slate-900/40 p-3 backdrop-blur-xl flex flex-col justify-between">
+      <div className="mb-1 flex items-center justify-between gap-2 shrink-0">
         <div className="min-w-0">
           <h3 className="text-sm font-semibold uppercase tracking-wider text-bold-slate-400">
             Yearly Water Level Comparison
@@ -83,8 +83,8 @@ export function RecentReadingsTable({
         </div>
       </div>
 
-      <div className="relative flex-1 min-h-0 my-3">
-        <div ref={scrollRef} className="h-[140px] w-full">
+      <div className="relative flex-1 min-h-0 my-2">
+        <div ref={scrollRef} className="h-full w-full">
           <ResponsiveContainer width="100%" height="100%">
             <BarChart data={yearlyData} margin={{ top: 10, right: 10, bottom: 6, left: 0 }}>
               <CartesianGrid stroke="rgba(148, 163, 184, 0.12)" strokeDasharray="3 3" />
@@ -118,7 +118,7 @@ export function RecentReadingsTable({
         </div>
       </div>
 
-      <div className="flex items-center justify-center gap-4 text-[11px] text-slate-500 my-1">
+      <div className="flex items-center justify-center gap-4 text-[11px] text-slate-500 my-1 shrink-0">
         <span className="flex items-center gap-2">
           <span className="h-2 w-2 rounded-full bg-slate-400/60" />
           2025 (previous)

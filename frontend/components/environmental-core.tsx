@@ -157,9 +157,9 @@ export function SpeedometerGauge({
   const ny = cy - needleLen * Math.sin(needleRad);
 
   return (
-    <div className="flex flex-row items-start justify-between w-full h-full px-2 gap-1 pt-9 scale-[1.02] transform origin-center">
-      {/* Gauge on the Left - Maximized Arc */}
-      <div className="relative h-35 w-[86%] flex items-center justify-center overflow-visible">
+    <div className="flex flex-col items-center justify-between w-full h-full px-2 gap-1 pt-3 scale-[1.02] transform origin-center">
+      {/* Gauge in the Center */}
+      <div className="relative h-[62%] min-h-[105px] w-full flex items-center justify-center overflow-visible">
         <svg viewBox="0 25 360 150" className="h-full w-full drop-shadow-[0_0_15px_rgba(30,41,59,0.3)]">
           {/* Glow filters for each zone */}
           <defs>
@@ -234,25 +234,30 @@ export function SpeedometerGauge({
         </svg>
       </div>
 
-      {/* Vertical Info Bar on the Far Right */}
-      <div className="flex flex-col justify-start gap-1 w-[22%] pl-1 mt-1">
-        <div className="flex flex-col items-start py-0.04 border-b border-white/5">
-          <div className="text-[8px] font-black uppercase tracking-[0.2em] text-slate-500 mb-0.5">IRMS</div>
-          <div className="text-[13px] font-mono font-black text-cyan-400">
-            {safeIrms.toFixed(1)} <span className="text-[9px] font-normal text-slate-500">A</span>
-          </div>
+      {/* Horizontal Info Bar at the Bottom */}
+      <div className="flex flex-row justify-around items-center w-full px-2 mt-2 gap-2 relative z-10 border-t border-white/[0.05] pt-2">
+        <div className="flex flex-col items-center text-center flex-1">
+          <span className="text-[7px] font-black text-slate-500 uppercase tracking-tighter leading-none mb-1">
+            IRMS
+          </span>
+          <span className="text-[10px] font-black font-mono text-white leading-none whitespace-nowrap">
+            {safeIrms.toFixed(1)}<span className="text-[6.5px] font-bold text-slate-400 ml-0.5">A</span>
+          </span>
         </div>
-        <div className="flex flex-col items-start py-0.5">
-          <div className="text-[9px] font-black uppercase tracking-[0.2em] text-slate-500 mb-0.5">Status</div>
-          <div
-            className="text-[11px] font-black uppercase tracking-widest leading-none drop-shadow-sm"
+        <div className="flex flex-col items-center text-center flex-1">
+          <span className="text-[7px] font-black text-slate-500 uppercase tracking-tighter leading-none mb-1">
+            Status
+          </span>
+          <span 
+            className="text-[10px] font-black uppercase tracking-tight leading-none whitespace-nowrap"
             style={{ color: activeZone.color }}
           >
             {activeStatus}
-          </div>
+          </span>
         </div>
       </div>
-    </div>);
+    </div>
+  );
 }
 
 export function EnvironmentalCore({

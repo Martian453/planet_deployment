@@ -93,7 +93,7 @@ export function AQIPollutantHub({
         </div>
 
         {/* Values & Tiles */}
-        <div className="w-full flex-1 overflow-hidden px-2 py-1">
+        <div className="w-full flex-1 overflow-hidden px-2 py-1 flex flex-col">
           <AirQualityCard
             data={data}
             activeMetric={activeMetric}

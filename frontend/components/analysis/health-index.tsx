@@ -60,28 +60,28 @@ export function BorewellHealthIndex({
       ? (efficiency > 0 ? Math.min(100, Math.max(30, Math.round(efficiency))) : 85)
       : 95;
     
-    const mechanicalStatus = mechanicalScore >= 80 ? "NOMINAL" : mechanicalScore >= 60 ? "CAUTION" : "CRITICAL";
-    const mechanicalColor = mechanicalStatus === "NOMINAL" ? "#10b981" : mechanicalStatus === "CAUTION" ? "#f59e0b" : "#ef4444";
-    const mechanicalGlow = mechanicalStatus === "NOMINAL" ? "rgba(16, 185, 129, 0.4)" : mechanicalStatus === "CAUTION" ? "rgba(245, 158, 11, 0.4)" : "rgba(239, 68, 68, 0.4)";
+    const mechanicalStatus = mechanicalScore >= 75 ? "NOMINAL" : "CAUTION";
+    const mechanicalColor = mechanicalStatus === "NOMINAL" ? "#10b981" : "#f59e0b";
+    const mechanicalGlow = mechanicalStatus === "NOMINAL" ? "rgba(16, 185, 129, 0.4)" : "rgba(245, 158, 11, 0.4)";
 
     // 2. Hydrological Health: Water Level (optimal > 3.5ft) and Flow rate stability
     const levelScore = Math.min(100, Math.max(10, (level / 6.0) * 100));
     const flowScore = isMotorOn ? Math.min(100, Math.max(10, (flowRate / 45.0) * 100)) : 90;
     const hydrologicalScore = Math.round((levelScore + flowScore) / 2);
     
-    const hydrologicalStatus = hydrologicalScore >= 75 ? "NOMINAL" : hydrologicalScore >= 55 ? "CAUTION" : "CRITICAL";
-    const hydrologicalColor = hydrologicalStatus === "NOMINAL" ? "#10b981" : hydrologicalStatus === "CAUTION" ? "#f59e0b" : "#ef4444";
-    const hydrologicalGlow = hydrologicalStatus === "NOMINAL" ? "rgba(16, 185, 129, 0.4)" : hydrologicalStatus === "CAUTION" ? "rgba(245, 158, 11, 0.4)" : "rgba(239, 68, 68, 0.4)";
+    const hydrologicalStatus = hydrologicalScore >= 75 ? "NOMINAL" : "CAUTION";
+    const hydrologicalColor = hydrologicalStatus === "NOMINAL" ? "#10b981" : "#f59e0b";
+    const hydrologicalGlow = hydrologicalStatus === "NOMINAL" ? "rgba(16, 185, 129, 0.4)" : "rgba(245, 158, 11, 0.4)";
 
-    // 3. Bio-Chemical Health: pH balance (ideal 7.2), TDS levels (ideal < 300), Turbidity (ideal < 2.0 NTU)
+    // 3. Hydro phonic parameters: pH balance (ideal 7.2), TDS levels (ideal < 300), Turbidity (ideal < 2.0 NTU)
     const phScore = Math.max(0, 100 - Math.abs(7.2 - ph) * 45);
     const tdsScore = Math.max(0, 100 - Math.max(0, tds - 300) * 0.15);
     const turbidityScore = Math.max(0, 100 - turbidity * 8);
     const biochemicalScore = Math.round((phScore + tdsScore + turbidityScore) / 3);
 
-    const biochemicalStatus = biochemicalScore >= 80 ? "NOMINAL" : biochemicalScore >= 60 ? "CAUTION" : "CRITICAL";
-    const biochemicalColor = biochemicalStatus === "NOMINAL" ? "#10b981" : biochemicalStatus === "CAUTION" ? "#f59e0b" : "#ef4444";
-    const biochemicalGlow = biochemicalStatus === "NOMINAL" ? "rgba(16, 185, 129, 0.4)" : biochemicalStatus === "CAUTION" ? "rgba(245, 158, 11, 0.4)" : "rgba(239, 68, 68, 0.4)";
+    const biochemicalStatus = biochemicalScore >= 75 ? "NOMINAL" : "CAUTION";
+    const biochemicalColor = biochemicalStatus === "NOMINAL" ? "#10b981" : "#f59e0b";
+    const biochemicalGlow = biochemicalStatus === "NOMINAL" ? "rgba(16, 185, 129, 0.4)" : "rgba(245, 158, 11, 0.4)";
 
     return [
       {
@@ -101,7 +101,7 @@ export function BorewellHealthIndex({
         status: hydrologicalStatus,
       },
       {
-        label: "Bio-Chemical",
+        label: "Hydro phonic parameters",
         score: biochemicalScore,
         icon: <FlaskConical className="h-3 w-3" />,
         color: biochemicalColor,
@@ -115,9 +115,9 @@ export function BorewellHealthIndex({
     return Math.round(pillars[0].score * 0.35 + pillars[1].score * 0.35 + pillars[2].score * 0.30)
   }, [pillars])
 
-  const verdictLabel = overallScore >= 80 ? "OPTIMAL" : overallScore >= 60 ? "CAUTION" : "CRITICAL"
-  const verdictColor = overallScore >= 80 ? "text-emerald-400" : overallScore >= 60 ? "text-amber-400" : "text-red-400"
-  const verdictBg = overallScore >= 80 ? "bg-emerald-500/10 border-emerald-500/20" : overallScore >= 60 ? "bg-amber-500/10 border-amber-500/20" : "bg-red-500/10 border-red-500/20"
+  const verdictLabel = overallScore >= 75 ? "OPTIMAL" : "CAUTION"
+  const verdictColor = overallScore >= 75 ? "text-emerald-400" : "text-amber-400"
+  const verdictBg = overallScore >= 75 ? "bg-emerald-500/10 border-emerald-500/20" : "bg-amber-500/10 border-amber-500/20"
 
   // ── Maintenance Predictions ───────────────────────────────
   const maintenance: MaintenanceItem[] = useMemo(() => {
@@ -136,7 +136,7 @@ export function BorewellHealthIndex({
       {
         label: "Filter Change",
         daysLeft: filterChangeDays,
-        icon: <Timer className={`h-3 w-3 ${filterChangeDays < 5 ? 'text-red-400' : 'text-amber-400'}`} />,
+        icon: <Timer className="h-3 w-3 text-amber-400" />,
         urgency: filterChangeDays < 5 ? 'high' : filterChangeDays < 10 ? 'medium' : 'low',
       },
       {
@@ -150,23 +150,20 @@ export function BorewellHealthIndex({
 
   // ── Helper: Get bar color based on score ──────────────────
   const getBarGradient = (score: number) => {
-    if (score >= 80) return "from-emerald-500 to-emerald-400"
-    if (score >= 60) return "from-amber-500 to-amber-400"
-    return "from-red-500 to-red-400"
+    if (score >= 75) return "from-emerald-500 to-emerald-400"
+    return "from-amber-500 to-amber-400"
   }
 
   // Generate diagnostic description dynamically
   const diagnosticText = useMemo(() => {
     if (verdictLabel === "OPTIMAL") {
       return "Hydraulic stable. Aquifer recharge within normal parameters. Chemical draw nominal.";
-    } else if (verdictLabel === "CAUTION") {
-      const issues = [];
-      if (pillars[0].score < 80) issues.push("low motor efficiency");
-      if (pillars[1].score < 80) issues.push("aquifer drawdown");
-      if (pillars[2].score < 80) issues.push("chemical deviation");
-      return `System caution. Detected ${issues.join(" and ") || "minor variations"}. Monitor performance.`;
     } else {
-      return "Critical Alert: Imminent pump dry run danger or severe chemical contamination detected!";
+      const issues = [];
+      if (pillars[0].score < 75) issues.push("low motor efficiency");
+      if (pillars[1].score < 75) issues.push("aquifer drawdown");
+      if (pillars[2].score < 75) issues.push("chemical deviation");
+      return `System caution. Detected ${issues.join(" and ") || "minor variations"}. Monitor performance.`;
     }
   }, [verdictLabel, pillars]);
 
@@ -276,11 +273,11 @@ export function BorewellHealthIndex({
 
       {/* ── DIAGNOSIS FOOTER ─────────────────────────────── */}
       <div className="mt-2 flex items-center gap-2 rounded-lg bg-white/[0.03] px-2 py-1.5 relative z-10 border border-white/[0.04]">
-        <div className={`flex h-1.5 w-1.5 rounded-full animate-pulse flex-shrink-0 ${verdictLabel === 'OPTIMAL' ? 'bg-emerald-400' : verdictLabel === 'CAUTION' ? 'bg-amber-400' : 'bg-red-400'}`} />
+        <div className={`flex h-1.5 w-1.5 rounded-full animate-pulse flex-shrink-0 ${verdictLabel === 'OPTIMAL' ? 'bg-emerald-400' : 'bg-amber-400'}`} />
         <p className="text-[9px] font-medium text-slate-400 leading-tight flex-1">
-          <span className="text-white font-bold">{verdictLabel === 'OPTIMAL' ? 'Hydraulic stable.' : verdictLabel === 'CAUTION' ? 'System alert.' : 'Critical error.'}</span> {diagnosticText}
+          <span className="text-white font-bold">{verdictLabel === 'OPTIMAL' ? 'Hydraulic stable.' : 'System alert.'}</span> {diagnosticText}
         </p>
-        <span className={`text-[9px] font-mono font-bold uppercase flex-shrink-0 ${isOffline ? 'text-red-400' : 'text-blue-400'}`}>
+        <span className={`text-[9px] font-mono font-bold uppercase flex-shrink-0 ${isOffline ? 'text-amber-400' : 'text-blue-400'}`}>
           {isOffline ? 'Offline' : 'Live'}
         </span>
       </div>
