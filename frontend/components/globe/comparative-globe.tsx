@@ -1,6 +1,6 @@
 "use client"
 
-import { useEffect, useState, useRef, useMemo, useCallback } from 'react'
+import { useEffect, useState, useRef, useMemo, useCallback, memo } from 'react'
 import dynamic from 'next/dynamic'
 import { fetchGlobalAQData, type GlobalAQPoint } from '@/utils/aqi-comparison'
 import {
@@ -28,7 +28,7 @@ interface GlobalComparativeGlobeProps {
   locationName?: string
 }
 
-export function GlobalComparativeGlobe({
+export const GlobalComparativeGlobe = memo(function GlobalComparativeGlobe({
   userAQI = 42,
   userLat = 12.9716,
   userLng = 77.5946,
@@ -285,4 +285,4 @@ export function GlobalComparativeGlobe({
       )}
     </div>
   )
-}
+})

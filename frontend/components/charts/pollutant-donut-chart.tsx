@@ -6,7 +6,7 @@ import {
     Cell,
     ResponsiveContainer,
 } from "recharts"
-import { useState, useMemo } from "react"
+import { useState, useMemo, memo } from "react"
 import { calculateSubIndex } from "@/utils/aqi-calculator"
 
 interface PollutantDonutChartProps {
@@ -21,7 +21,7 @@ interface PollutantDonutChartProps {
     sideBySide?: boolean
 }
 
-export function PollutantDonutChart({ airData, transparent = false, sideBySide = false }: PollutantDonutChartProps) {
+export const PollutantDonutChart = memo(function PollutantDonutChart({ airData, transparent = false, sideBySide = false }: PollutantDonutChartProps) {
     const [activeIndex, setActiveIndex] = useState(0)
 
     const data = useMemo(() => {
@@ -135,4 +135,4 @@ export function PollutantDonutChart({ airData, transparent = false, sideBySide =
             </div>
         </div>
     )
-}
+})

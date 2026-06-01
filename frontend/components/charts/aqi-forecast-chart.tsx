@@ -1,7 +1,7 @@
 "use client"
 
 import { Line, LineChart, ResponsiveContainer, Tooltip, XAxis, YAxis, CartesianGrid, ReferenceLine, Legend } from "recharts"
-import { useMemo, useState } from "react"
+import { useMemo, useState, memo } from "react"
 import { Maximize2 } from "lucide-react"
 import { generateWaveform, generateTimeLabels, type TimeRange } from "@/utils/data-simulator"
 
@@ -15,7 +15,7 @@ interface MetricHistoryChartProps {
     onExpand?: () => void
 }
 
-export function MetricHistoryChart({ data, activeMetric, onMetricSelect, timeRange, onTimeRangeChange, compact = false, onExpand }: MetricHistoryChartProps) {
+export const MetricHistoryChart = memo(function MetricHistoryChart({ data, activeMetric, onMetricSelect, timeRange, onTimeRangeChange, compact = false, onExpand }: MetricHistoryChartProps) {
     const [hoveredTime, setHoveredTime] = useState<string | null>(null)
     const [activeLines, setActiveLines] = useState<string[]>([]) // Track which lines are visible
 
@@ -265,4 +265,4 @@ export function MetricHistoryChart({ data, activeMetric, onMetricSelect, timeRan
             </div>
         </div>
     )
-}
+})

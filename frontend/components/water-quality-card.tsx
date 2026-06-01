@@ -32,6 +32,7 @@ interface WaterQualityData {
     level: number[]
     ph: number[]
     tds: number[]
+    turbidity?: number[]
   }
 }
 

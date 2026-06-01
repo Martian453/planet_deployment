@@ -6,7 +6,7 @@ import {
     Cell,
     ResponsiveContainer,
 } from "recharts"
-import { useState, useMemo, useEffect } from "react"
+import { useState, useMemo, useEffect, memo } from "react"
 
 interface WaterDonutChartProps {
     waterData?: {
@@ -24,7 +24,7 @@ interface WaterDonutChartProps {
     sideBySide?: boolean
 }
 
-export function WaterDonutChart({ waterData, transparent = false }: WaterDonutChartProps) {
+export const WaterDonutChart = memo(function WaterDonutChart({ waterData, transparent = false }: WaterDonutChartProps) {
     const [activeIndex, setActiveIndex] = useState(0)
 
     useEffect(() => {
@@ -159,4 +159,4 @@ export function WaterDonutChart({ waterData, transparent = false }: WaterDonutCh
             </div>
         </div>
     )
-}
+})

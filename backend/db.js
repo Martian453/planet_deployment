@@ -4,8 +4,30 @@ const path = require('path');
 const dbPath = process.env.SQLITE_DB_PATH || path.join(__dirname, 'environment.db');
 const db = new sqlite3.Database(dbPath);
 
+// AUDIT FIX (Finding 7.2 — High): Enable WAL mode for better concurrent read/write.
+// WAL allows readers and writers to operate simultaneously, preventing SQLITE_BUSY errors
+// when sensor ingestion and dashboard queries overlap.
+db.run('PRAGMA journal_mode=WAL', (err) => {
+  if (err) console.warn('⚠️  Could not enable WAL mode:', err.message);
+  else console.log('✅ SQLite WAL mode enabled');
+});
+
 // Initialize tables
 db.serialize(() => {
+  // 0. User profiles table for dashboard logins
+  db.run(`CREATE TABLE IF NOT EXISTS users (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    email TEXT UNIQUE,
+    password TEXT,
+    full_name TEXT
+  )`);
+
+  db.get("SELECT COUNT(*) as count FROM users WHERE email = 'trifecta'", (err, row) => {
+    if (row && row.count === 0) {
+      db.run("INSERT INTO users (email, password, full_name) VALUES ('trifecta', '12345', 'Trifecta Admin')");
+    }
+  });
+
   // 1. Live state for all 3 borewells
   db.run(`CREATE TABLE IF NOT EXISTS borewell_state (
     id TEXT PRIMARY KEY,
@@ -70,6 +92,13 @@ db.serialize(() => {
     db.run(`ALTER TABLE borewell_state ADD COLUMN ${col} ${colType}`, (err) => { /* Ignore */ });
     db.run(`ALTER TABLE readings_history ADD COLUMN ${col} ${colType}`, (err) => { /* Ignore */ });
   });
+
+  // AUDIT FIX (Finding 3.2 — High): Add indexes for time-series query performance.
+  // Without these, ORDER BY timestamp DESC requires a full table scan.
+  db.run(`CREATE INDEX IF NOT EXISTS idx_readings_borewell_time 
+    ON readings_history(borewell_id, timestamp DESC)`);
+  db.run(`CREATE INDEX IF NOT EXISTS idx_aqi_time 
+    ON aqi_history(timestamp DESC)`);
 
   // Seed initial data if empty
   db.get("SELECT COUNT(*) as count FROM borewell_state", (err, row) => {

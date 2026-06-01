@@ -4,6 +4,9 @@ import { useEffect, useState, useRef, useMemo } from "react"
 import { AirQualityCard } from "@/components/air-quality-card"
 import { LoadingScreen } from "@/components/loading-screen"
 import { SpeedometerGauge } from "@/components/environmental-core"
+import { ErrorBoundary } from "@/components/error-boundary"
+import { apiClient } from "@/lib/api"
+import { toast } from "sonner"
 import { calculateAQI } from "@/utils/aqi-calculator"
 import { WaterQualityCard } from "@/components/water-quality-card"
 import { SidebarNavigation } from "@/components/sidebar-navigation"
@@ -69,7 +72,7 @@ export function PrivateDashboard() {
     const [maxWaterLevel, setMaxWaterLevel] = useState(0)
     const hasAutoSelected = useRef(false); // Track smart auto-selection
     const [loopIndex, setLoopIndex] = useState(0);
-    const waterDataRef = require('react').useRef(null);
+    const waterDataRef = useRef(null);
     // PRODUCTIZATION STATE
     // PRODUCTIZATION STATE
     const [selectedPollutant, setSelectedPollutant] = useState<string | null>(null);
@@ -123,21 +126,24 @@ export function PrivateDashboard() {
     // Real-Time Data Hook (Pass Token!)
     const { data: wsData, isConnected: wsConnected, isLive, lastMessageTime, isOffline: wsOffline } = useRealtimeData(currentLocation, token);
 
-    // --- DATA STATES (Granular) ---
     const [lastAirTime, setLastAirTime] = useState(0);
+    const lastAirTimeRef = useRef(0);
+    useEffect(() => {
+        lastAirTimeRef.current = lastAirTime;
+    }, [lastAirTime]);
     const [lastWaterTime, setLastWaterTime] = useState(0);
     const [currentTime, setCurrentTime] = useState(Date.now());
 
-    // Update 'currentTime' every second for offline calc AND increment motor timers for all ON units
+    // Update 'currentTime' every 5 seconds for offline calc AND increment motor timers for all ON units
     useEffect(() => {
         const interval = setInterval(() => {
             setCurrentTime(Date.now());
             if (demoMode) {
                 setBorewells(prev => prev.map(bw =>
-                    bw.isMotorOn ? { ...bw, runTime: bw.runTime + 1 } : bw
+                    bw.isMotorOn ? { ...bw, runTime: bw.runTime + 5 } : bw
                 ));
             }
-        }, 1000);
+        }, 5000);
         return () => clearInterval(interval);
     }, [demoMode]);
 
@@ -173,57 +179,59 @@ export function PrivateDashboard() {
         if (!token) return;
 
         const checkStatus = async () => {
+            // Guard: Pause polling when page is hidden (Finding 3.2 / 7.1)
+            if (typeof document !== "undefined" && document.hidden) return;
+
             try {
-                const res = await fetch(getApiUrl("/api/locations/status"), {
-                    headers: { "Authorization": `Bearer ${token}` }
-                });
-                if (res.ok) {
-                    const data: Array<{ location_id: string; online: boolean; last_seen: string | null; latitude: number | null; longitude: number | null; name: string }> = await res.json();
-                    // Map for easy lookup
-                    const statusMap: Record<string, { location_id: string; online: boolean; last_seen: string | null; latitude: number | null; longitude: number | null; name: string }> = {};
-                    let anyOnline = false;
-                    let currentLocOnline = false;
+                const data = await apiClient<Array<{ location_id: string; online: boolean; last_seen: string | null; latitude: number | null; longitude: number | null; name: string }>>(
+                    "/api/locations/status", 
+                    { token, showErrorToast: false }
+                );
+                
+                // Map for easy lookup
+                const statusMap: Record<string, { location_id: string; online: boolean; last_seen: string | null; latitude: number | null; longitude: number | null; name: string }> = {};
+                let anyOnline = false;
+                let currentLocOnline = false;
 
-                    data.forEach(loc => {
-                        statusMap[loc.location_id] = loc;
-                        if (loc.online) {
-                            anyOnline = true;
-                        }
-                        if (loc.location_id === currentLocation && loc.online) currentLocOnline = true;
-                    });
-
-                    // SMART AUTO-SWITCH LOGIC
-                    // If current location is OFFLINE, but we found another one ONLINE, switch to it!
-                    if (!currentLocOnline && anyOnline) {
-                        const onlineLoc = data.find(l => l.online);
-                        if (onlineLoc) {
-                            console.log(`🚀 Auto-switching from offline ${currentLocation} to online ${onlineLoc.location_id}`);
-                            setCurrentLocation(onlineLoc.location_id);
-
-                            // Reset data states
-                            setAirData(null);
-                            setWaterData(null);
-                            setMaxWaterLevel(0);
-
-                            // Assume new location is online immediately for UI snappiness
-                            currentLocOnline = true;
-                        }
-                    } else if (!hasAutoSelected.current && data.length > 0) {
-                        // Initial Load Fallback
-                        const firstOnline = data.find(l => l.online);
-                        if (firstOnline && (!currentLocation || firstOnline.location_id !== currentLocation)) {
-                            console.log("🚀 Initial Auto-select:", firstOnline.location_id);
-                            setCurrentLocation(firstOnline.location_id);
-                            currentLocOnline = true;
-                        }
-                        hasAutoSelected.current = true;
+                data.forEach(loc => {
+                    statusMap[loc.location_id] = loc;
+                    if (loc.online) {
+                        anyOnline = true;
                     }
+                    if (loc.location_id === currentLocation && loc.online) currentLocOnline = true;
+                });
 
-                    setLocationsStatus(statusMap);
+                // SMART AUTO-SWITCH LOGIC
+                // If current location is OFFLINE, but we found another one ONLINE, switch to it!
+                if (!currentLocOnline && anyOnline) {
+                    const onlineLoc = data.find(l => l.online);
+                    if (onlineLoc) {
+                        console.log(`🚀 Auto-switching from offline ${currentLocation} to online ${onlineLoc.location_id}`);
+                        setCurrentLocation(onlineLoc.location_id);
 
-                    // Force update if we just auto-switched
-                    setIsSystemOnline(currentLocOnline);
+                        // Reset data states
+                        setAirData(null);
+                        setWaterData(null);
+                        setMaxWaterLevel(0);
+
+                        // Assume new location is online immediately for UI snappiness
+                        currentLocOnline = true;
+                    }
+                } else if (!hasAutoSelected.current && data.length > 0) {
+                    // Initial Load Fallback
+                    const firstOnline = data.find(l => l.online);
+                    if (firstOnline && (!currentLocation || firstOnline.location_id !== currentLocation)) {
+                        console.log("🚀 Initial Auto-select:", firstOnline.location_id);
+                        setCurrentLocation(firstOnline.location_id);
+                        currentLocOnline = true;
+                    }
+                    hasAutoSelected.current = true;
                 }
+
+                setLocationsStatus(statusMap);
+
+                // Force update if we just auto-switched
+                setIsSystemOnline(currentLocOnline);
             } catch (err) {
                 console.warn("Location status poll failed", err);
                 setIsSystemOnline(false);
@@ -260,10 +268,7 @@ export function PrivateDashboard() {
         if (demoMode) return;
         if (!token) return;
 
-        fetch(getApiUrl("/api/locations"), {
-            headers: { "Authorization": `Bearer ${token}` }
-        })
-            .then(res => res.json())
+        apiClient("/api/locations", { token })
             .then(data => {
                 if (Array.isArray(data) && data.length > 0) {
                     setLocations(data);
@@ -291,10 +296,7 @@ export function PrivateDashboard() {
 
         // Fetch Capabilities... (existing code)
         if (token) {
-            fetch(getApiUrl(`/api/location/${locName}/capabilities`), {
-                headers: { "Authorization": `Bearer ${token}` }
-            })
-                .then(res => res.json())
+            apiClient(`/api/location/${locName}/capabilities`, { token })
                 .then(data => {
                     if (data && typeof data.has_aqi === 'boolean') {
                         setCapabilities({ has_aqi: data.has_aqi, has_water: data.has_water });
@@ -315,10 +317,7 @@ export function PrivateDashboard() {
     const fetchDevices = () => {
         if (demoMode) return;
         if (token) {
-            fetch(getApiUrl("/api/devices"), {
-                headers: { "Authorization": `Bearer ${token}` }
-            })
-                .then(res => res.json())
+            apiClient("/api/devices", { token })
                 .then(data => setMyDevices(data))
                 .catch(err => console.error("Failed devices:", err));
         }
@@ -339,38 +338,38 @@ export function PrivateDashboard() {
         if (demoMode) return; // Only if not in full demo
 
         const fetchLatestData = async () => {
+            // Guard: Pause polling when page is hidden (Finding 3.2 / 7.1)
+            if (typeof document !== "undefined" && document.hidden) return;
+
             try {
                 // Fetch latest AQI
-                const aqiRes = await fetch(getApiUrl("/api/aqi/history?limit=1"));
-                if (aqiRes.ok) {
-                    const history = await aqiRes.json();
-                    if (history.length > 0) {
-                        const latest = history[history.length - 1];
-                        setAirData(prev => {
-                            // Only update if it's actually newer than what we have
-                            if (prev && new Date(latest.timestamp).getTime() <= lastAirTime) return prev;
+                const history = await apiClient("/api/aqi/history?limit=1", { token, showErrorToast: false });
+                if (history && history.length > 0) {
+                    const latest = history[history.length - 1];
+                    setAirData(prev => {
+                        // Only update if it's actually newer than what we have
+                        if (prev && new Date(latest.timestamp).getTime() <= lastAirTimeRef.current) return prev;
 
-                            const currentChart = prev?.chartData || { labels: [], pm25: [], pm10: [], co2: [], tvoc: [], hcho: [], temp: [], humidity: [] };
-                            const timeLabel = new Date(latest.timestamp).toLocaleTimeString('en-US', { hour12: false, hour: '2-digit', minute: '2-digit' });
+                        const currentChart = prev?.chartData || { labels: [], pm25: [], pm10: [], co2: [], tvoc: [], hcho: [], temp: [], humidity: [] };
+                        const timeLabel = new Date(latest.timestamp).toLocaleTimeString('en-US', { hour12: false, hour: '2-digit', minute: '2-digit' });
 
-                            setLastAirTime(new Date(latest.timestamp).getTime());
+                        setLastAirTime(new Date(latest.timestamp).getTime());
 
-                            return {
-                                ...latest,
-                                chartData: {
-                                    ...currentChart,
-                                    labels: [...currentChart.labels, timeLabel].slice(-100),
-                                    pm25: [...currentChart.pm25, latest.pm25].slice(-100),
-                                    pm10: [...currentChart.pm10, latest.pm10].slice(-100),
-                                    co2: [...currentChart.co2, latest.co2].slice(-100),
-                                    tvoc: [...currentChart.tvoc, latest.tvoc].slice(-100),
-                                    hcho: [...currentChart.hcho, latest.hcho].slice(-100),
-                                    temp: [...currentChart.temp, latest.temp].slice(-100),
-                                    humidity: [...currentChart.humidity, latest.humidity].slice(-100)
-                                }
-                            };
-                        });
-                    }
+                        return {
+                            ...latest,
+                            chartData: {
+                                ...currentChart,
+                                labels: [...currentChart.labels, timeLabel].slice(-100),
+                                pm25: [...currentChart.pm25, latest.pm25].slice(-100),
+                                pm10: [...currentChart.pm10, latest.pm10].slice(-100),
+                                co2: [...currentChart.co2, latest.co2].slice(-100),
+                                tvoc: [...currentChart.tvoc, latest.tvoc].slice(-100),
+                                hcho: [...currentChart.hcho, latest.hcho].slice(-100),
+                                temp: [...currentChart.temp, latest.temp].slice(-100),
+                                humidity: [...currentChart.humidity, latest.humidity].slice(-100)
+                            }
+                        };
+                    });
                 }
             } catch (err) {
                 console.warn("Live data poll failed", err);
@@ -378,8 +377,9 @@ export function PrivateDashboard() {
         };
 
         const interval = setInterval(fetchLatestData, 5000); // 5s fallback
+        fetchLatestData(); // Fetch once immediately
         return () => clearInterval(interval);
-    }, [lastAirTime, demoMode]);
+    }, [demoMode, token]);
 
     const handleDeleteDevice = async (deviceId: string, e: React.MouseEvent) => {
         e.stopPropagation(); // Prevent card click
@@ -390,20 +390,16 @@ export function PrivateDashboard() {
         if (!confirm(`Are you sure you want to delete device ${deviceId}? This action cannot be undone.`)) return;
 
         try {
-            const res = await fetch(getApiUrl(`/api/devices/${deviceId}`), {
+            await apiClient(`/api/devices/${deviceId}`, {
                 method: 'DELETE',
-                headers: { "Authorization": `Bearer ${token}` }
+                token
             });
-            if (res.ok) {
-                // Optimistic UI Update: Remove immediately
-                setMyDevices(prev => prev.filter(d => d.device_id !== deviceId));
-                // Optional: Background re-fetch to be safe
-                fetchDevices();
-            } else {
-                alert("Failed to delete device");
-            }
+            // Optimistic UI Update: Remove immediately
+            setMyDevices(prev => prev.filter(d => d.device_id !== deviceId));
+            toast.success(`Device ${deviceId} deleted successfully.`);
+            fetchDevices();
         } catch (err) {
-            console.error(err);
+            console.error("Delete device failed:", err);
         }
     }
 
@@ -731,21 +727,28 @@ export function PrivateDashboard() {
 
         // Sync with Real Backend if not in demo
         if (!demoMode) {
-            fetch(getApiUrl("/api/control"), {
+            apiClient("/api/control", {
                 method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
+                token,
                 body: JSON.stringify({ id: borewellId, command: currentStatus })
-            }).catch(err => console.error("Control Sync Failed:", err));
+            }).catch(err => {
+                console.error("Control Sync Failed:", err);
+                toast.error(`Pump command failed. Reverting motor state.`);
+                // Rollback state
+                setBorewells(prev => prev.map((bw, i) =>
+                    i === index ? { ...bw, isMotorOn: !bw.isMotorOn } : bw
+                ));
+            });
         }
     };
 
     // --- REAL BACKEND INITIAL SYNC ---
     useEffect(() => {
         if (demoMode) return;
+        if (!token) return; // Prevent raw requests on mount before token loads
 
         // 1. Fetch current states
-        fetch(getApiUrl("/api/borewells"))
-            .then(res => res.json())
+        apiClient("/api/borewells", { token })
             .then(data => {
                 if (Array.isArray(data)) {
                     setBorewells(data.map(bw => ({
@@ -792,8 +795,7 @@ export function PrivateDashboard() {
         const activeId = borewells[activeBorewellIndex]?.id;
         if (activeId) {
             const limit = timeRange === "1h" ? 50 : timeRange === "24h" ? 300 : 1000;
-            fetch(getApiUrl(`/api/history/${activeId}?limit=${limit}`))
-                .then(res => res.json())
+            apiClient(`/api/history/${activeId}?limit=${limit}`, { token })
                 .then(history => {
                     if (Array.isArray(history)) {
                         setWaterData(prev => {
@@ -819,8 +821,7 @@ export function PrivateDashboard() {
                 .catch(err => console.warn(`Failed to fetch history for ${activeId}:`, err));
         }
 
-        fetch(getApiUrl(`/api/aqi/history`))
-            .then(res => res.json())
+        apiClient(`/api/aqi/history`, { token })
             .then(history => {
                 if (Array.isArray(history)) {
                     if (history.length > 0) {
@@ -867,7 +868,7 @@ export function PrivateDashboard() {
                 }
             })
             .catch(err => console.warn("Failed to fetch AQI history:", err));
-    }, [demoMode, activeBorewellIndex, borewells, timeRange]);
+    }, [demoMode, activeBorewellIndex, timeRange, token]);
 
     // Visual Effects... (Existing)
     const [stars, setStars] = useState<Array<{ left: string; top: string; delay: string; duration: string }>>([])
@@ -892,11 +893,12 @@ export function PrivateDashboard() {
         })))
     }, [])
 
-    const safeAirData = airData || {
+    const safeAirData = useMemo(() => airData || {
         pm25: 0, pm10: 0, co2: 400, tvoc: 0, hcho: 0, temp: 0, humidity: 0,
         chartData: { labels: [], pm25: [], pm10: [], co2: [], tvoc: [], hcho: [], temp: [], humidity: [] }
-    };
-    const safeWaterData = {
+    }, [airData]);
+
+    const safeWaterData = useMemo(() => ({
         level: Number(waterData?.level ?? 0),
         ph: Number(waterData?.ph ?? 7.2),
         tds: Number(waterData?.tds ?? 250),
@@ -913,7 +915,7 @@ export function PrivateDashboard() {
         turbidityStatus: waterData?.turbidityStatus,
         tdsStatus: waterData?.tdsStatus,
         chartData: waterData?.chartData || { labels: [], level: [], ph: [], tds: [] }
-    };
+    }), [waterData]);
     const maxPm25Recorded = airData ? Math.max(airData.pm25, ...(airData.chartData?.pm25 || [])) : 0;
     const maxWaterLevelRecorded = waterData ? Math.max(waterData.level, ...(waterData.chartData?.level || [])) : 0;
 
@@ -1064,131 +1066,145 @@ export function PrivateDashboard() {
 
                                 {/* Top Left: Borewell Monitor */}
                                 <div className="lg:col-start-1 lg:row-start-1 min-h-[250px] lg:min-h-0">
-                                    <BorewellMonitorCard
-                                        activeBorewellIndex={activeBorewellIndex}
-                                        onBorewellChange={setActiveBorewellIndex}
-                                        isMotorOn={isMotorOn}
-                                        onMotorToggle={() => handleMotorToggle(activeBorewellIndex)}
-                                        data={{
-                                            flowRate: isMotorOn
-                                                ? Number(safeWaterData.flowRate || (demoMode ? rand(35 + activeBorewellIndex * 5, 55 + activeBorewellIndex * 5) : 0)).toFixed(1)
-                                                : "0.0",
-                                            efficiency: isMotorOn
-                                                ? Number(safeWaterData.efficiency || (demoMode ? Math.min(95, Math.max(40, Math.round(((safeWaterData.flowRate || 45) * 15) / (safeWaterData.irms || 8.4)))) : 0)).toFixed(0)
-                                                : "0",
-                                            voltage: isMotorOn
-                                                ? Number(safeWaterData.voltage || (demoMode ? rand(228, 242) : 0)).toFixed(0)
-                                                : "0",
-                                            current: isMotorOn
-                                                ? Number(safeWaterData.irms || (demoMode ? rand(7.8, 9.2) : 0)).toFixed(1)
-                                                : "0.0",
-                                            runTime: Number(safeWaterData.runTime || 0).toFixed(2),
-                                            liters: (safeWaterData.totalLiters !== undefined && safeWaterData.totalLiters !== null)
-                                                ? Number(safeWaterData.totalLiters).toFixed(1)
-                                                : (demoMode && isMotorOn
-                                                    ? (safeWaterData.flowRate
-                                                        ? Number(safeWaterData.flowRate * (motorRunTime / 60)).toFixed(0)
-                                                        : (800 + activeBorewellIndex * 100).toString())
-                                                    : "0.0")
-                                        }}
-                                    />
+                                    <ErrorBoundary title="Borewell Monitor">
+                                        <BorewellMonitorCard
+                                            activeBorewellIndex={activeBorewellIndex}
+                                            onBorewellChange={setActiveBorewellIndex}
+                                            isMotorOn={isMotorOn}
+                                            onMotorToggle={() => handleMotorToggle(activeBorewellIndex)}
+                                            data={{
+                                                flowRate: isMotorOn
+                                                    ? Number(safeWaterData.flowRate || (demoMode ? rand(35 + activeBorewellIndex * 5, 55 + activeBorewellIndex * 5) : 0)).toFixed(1)
+                                                    : "0.0",
+                                                efficiency: isMotorOn
+                                                    ? Number(safeWaterData.efficiency || (demoMode ? Math.min(95, Math.max(40, Math.round(((safeWaterData.flowRate || 45) * 15) / (safeWaterData.irms || 8.4)))) : 0)).toFixed(0)
+                                                    : "0",
+                                                voltage: isMotorOn
+                                                    ? Number(safeWaterData.voltage || (demoMode ? rand(228, 242) : 0)).toFixed(0)
+                                                    : "0",
+                                                current: isMotorOn
+                                                    ? Number(safeWaterData.irms || (demoMode ? rand(7.8, 9.2) : 0)).toFixed(1)
+                                                    : "0.0",
+                                                runTime: Number(safeWaterData.runTime || 0).toFixed(2),
+                                                liters: (safeWaterData.totalLiters !== undefined && safeWaterData.totalLiters !== null)
+                                                    ? Number(safeWaterData.totalLiters).toFixed(1)
+                                                    : (demoMode && isMotorOn
+                                                        ? (safeWaterData.flowRate
+                                                            ? Number(safeWaterData.flowRate * (motorRunTime / 60)).toFixed(0)
+                                                            : (800 + activeBorewellIndex * 100).toString())
+                                                        : "0.0")
+                                            }}
+                                        />
+                                    </ErrorBoundary>
                                 </div>
 
                                 <div className="lg:col-start-2 lg:row-start-1 overflow-hidden min-h-[350px] lg:min-h-0">
-                                    <WaterAnalysisSplit
-                                        waterData={{
-                                            ...safeWaterData,
-                                            level: safeWaterData.level || (demoMode ? (isMotorOn ? rand(4.2, 5.8) : rand(1.2, 2.5)) : 0),
-                                            irms: safeWaterData.irms || (demoMode ? (isMotorOn ? rand(7.8, 9.2) : 0) : 0),
-                                            tds: safeWaterData.tds || (demoMode ? rand(210, 240) : 0),
-                                            ph: safeWaterData.ph || (demoMode ? rand(6.8, 7.4) : 0),
-                                            turbidity: safeWaterData.turbidity || (demoMode ? rand(0.8, 1.8) : 0)
-                                        }}
-                                        maxWaterLevel={10}
-                                        waterStatus={isMotorOn ? "ACTIVE" : "STANDBY"}
-                                    />
+                                    <ErrorBoundary title="Water Analysis">
+                                        <WaterAnalysisSplit
+                                            waterData={{
+                                                ...safeWaterData,
+                                                level: safeWaterData.level || (demoMode ? (isMotorOn ? rand(4.2, 5.8) : rand(1.2, 2.5)) : 0),
+                                                irms: safeWaterData.irms || (demoMode ? (isMotorOn ? rand(7.8, 9.2) : 0) : 0),
+                                                tds: safeWaterData.tds || (demoMode ? rand(210, 240) : 0),
+                                                ph: safeWaterData.ph || (demoMode ? rand(6.8, 7.4) : 0),
+                                                turbidity: safeWaterData.turbidity || (demoMode ? rand(0.8, 1.8) : 0)
+                                            }}
+                                            maxWaterLevel={10}
+                                            waterStatus={isMotorOn ? "ACTIVE" : "STANDBY"}
+                                        />
+                                    </ErrorBoundary>
                                 </div>
 
                                 {/* Top Right: Global Comparative Globe */}
                                 <div className="lg:col-start-3 lg:row-start-1 overflow-hidden rounded-xl border border-white/5 bg-slate-900/20 backdrop-blur-md min-h-[350px] lg:min-h-0">
-                                    <GlobalComparativeGlobe
-                                        userAQI={calculateAQI({
-                                            pm25: safeAirData.pm25,
-                                            pm10: safeAirData.pm10
-                                        }).aqi}
-                                        userLat={locationsStatus[currentLocation]?.latitude ?? 12.9716}
-                                        userLng={locationsStatus[currentLocation]?.longitude ?? 77.5946}
-                                        locationName={currentLocation || "BLR-01"}
-                                    />
+                                    <ErrorBoundary title="Global Comparative Globe">
+                                        <GlobalComparativeGlobe
+                                            userAQI={calculateAQI({
+                                                pm25: safeAirData.pm25,
+                                                pm10: safeAirData.pm10
+                                            }).aqi}
+                                            userLat={locationsStatus[currentLocation]?.latitude ?? 12.9716}
+                                            userLng={locationsStatus[currentLocation]?.longitude ?? 77.5946}
+                                            locationName={currentLocation || "BLR-01"}
+                                        />
+                                    </ErrorBoundary>
                                 </div>
 
                                 {/* ═══ ROW 2: THE TRENDS ═══ */}
-                                {/* Middle Left: Borewell System Health Index (Radar) */}
+                                {/* Middle Left: Borewell System Health Index */}
                                 <div className="lg:col-start-1 lg:row-start-2 overflow-hidden min-h-[300px] lg:min-h-0">
-                                    <BorewellHealthIndex
-                                        waterData={safeWaterData}
-                                        isMotorOn={isMotorOn}
-                                        leakStatus={isMotorOn ? "Nominal" : "Standby"}
-                                        isOffline={isWaterOffline}
-                                    />
+                                    <ErrorBoundary title="Borewell Health Index">
+                                        <BorewellHealthIndex
+                                            waterData={safeWaterData}
+                                            isMotorOn={isMotorOn}
+                                            leakStatus={isMotorOn ? "Nominal" : "Standby"}
+                                            isOffline={isWaterOffline}
+                                        />
+                                    </ErrorBoundary>
                                 </div>
 
                                 <div className="lg:col-start-2 lg:row-start-2 overflow-hidden min-h-[350px] lg:min-h-0">
-                                    <WaterQualityCard
-                                        data={{
-                                            ...safeWaterData,
-                                            chartData: (safeWaterData.chartData && safeWaterData.chartData.labels && safeWaterData.chartData.labels.length > 0)
-                                                ? safeWaterData.chartData
-                                                : (demoMode ? {
-                                                    labels: Array(24).fill(0).map((_, i) => `${i}:00`),
-                                                    level: Array(24).fill(0).map(() => rand(40, 50)),
-                                                    ph: Array(24).fill(0).map(() => rand(6.8, 7.5)),
-                                                    tds: Array(24).fill(0).map(() => rand(200, 230)),
-                                                    turbidity: Array(24).fill(0).map(() => rand(0.8, 1.8))
-                                                } : {
-                                                    labels: [],
-                                                    level: [],
-                                                    ph: [],
-                                                    tds: [],
-                                                    turbidity: []
-                                                })
-                                        }}
-                                        activeMetric={selectedWaterMetric}
-                                        onMetricSelect={handleWaterTileClick}
-                                        onExpand={() => setModalConfig({ isOpen: true, type: 'water' })}
-                                        isOffline={isWaterOffline}
-                                        mode="line-only"
-                                        timeRange={timeRange}
-                                        onTimeRangeChange={setTimeRange}
-                                        isMotorOn={isMotorOn}
-                                    />
+                                    <ErrorBoundary title="Water Quality Card">
+                                        <WaterQualityCard
+                                            data={{
+                                                ...safeWaterData,
+                                                chartData: (safeWaterData.chartData && safeWaterData.chartData.labels && safeWaterData.chartData.labels.length > 0)
+                                                    ? safeWaterData.chartData
+                                                    : (demoMode ? {
+                                                        labels: Array(24).fill(0).map((_, i) => `${i}:00`),
+                                                        level: Array(24).fill(0).map(() => rand(40, 50)),
+                                                        ph: Array(24).fill(0).map(() => rand(6.8, 7.5)),
+                                                        tds: Array(24).fill(0).map(() => rand(200, 230)),
+                                                        turbidity: Array(24).fill(0).map(() => rand(0.8, 1.8))
+                                                    } : {
+                                                        labels: [],
+                                                        level: [],
+                                                        ph: [],
+                                                        tds: [],
+                                                        turbidity: []
+                                                    })
+                                            }}
+                                            activeMetric={selectedWaterMetric}
+                                            onMetricSelect={handleWaterTileClick}
+                                            onExpand={() => setModalConfig({ isOpen: true, type: 'water' })}
+                                            isOffline={isWaterOffline}
+                                            mode="line-only"
+                                            timeRange={timeRange}
+                                            onTimeRangeChange={setTimeRange}
+                                            isMotorOn={isMotorOn}
+                                        />
+                                    </ErrorBoundary>
                                 </div>
 
-                                {/* Middle Right: Yearly Water Level Comparison (Fixed) */}
+                                {/* Middle Right: Yearly Water Level Comparison */}
                                 <div className="lg:col-start-3 lg:row-start-2 overflow-hidden min-h-[300px] lg:min-h-0">
-                                    <RecentReadingsTable
-                                        waterLevels={historicalReadings.waterLevels}
-                                        aqiValues={historicalReadings.aqiValues}
-                                        labels={historicalReadings.labels}
-                                        period={readingsPeriod}
-                                        onPeriodChange={setReadingsPeriod}
-                                        onExpand={() => setReadingsModalOpen(true)}
-                                        yearlyLabels={yearlyWaterComparison.labels}
-                                        yearlyWaterLevels={yearlyWaterComparison.waterLevels}
-                                    />
+                                    <ErrorBoundary title="Recent Readings">
+                                        <RecentReadingsTable
+                                            waterLevels={historicalReadings.waterLevels}
+                                            aqiValues={historicalReadings.aqiValues}
+                                            labels={historicalReadings.labels}
+                                            period={readingsPeriod}
+                                            onPeriodChange={setReadingsPeriod}
+                                            onExpand={() => setReadingsModalOpen(true)}
+                                            yearlyLabels={yearlyWaterComparison.labels}
+                                            yearlyWaterLevels={yearlyWaterComparison.waterLevels}
+                                        />
+                                    </ErrorBoundary>
                                 </div>
 
-                                {/* Bottom Left: AQI Pollutant Hub (Compact/Expand) */}
+                                {/* Bottom Left: AQI Pollutant Hub */}
                                 <div className="lg:col-start-1 lg:row-start-3 h-full flex flex-col overflow-hidden min-h-[300px] lg:min-h-0">
-                                    <AQIPollutantHub
-                                        data={safeAirData}
-                                        activeMetric={selectedPollutant}
-                                        onMetricSelect={handleTileClick}
-                                        isOffline={isAirOffline}
-                                        mode="compact"
-                                        timeRange={timeRange}
-                                        onTimeRangeChange={setTimeRange}
-                                    />
+                                    <ErrorBoundary title="AQI Pollutant Hub">
+                                        <AQIPollutantHub
+                                            data={safeAirData}
+                                            activeMetric={selectedPollutant}
+                                            onMetricSelect={handleTileClick}
+                                            isOffline={isAirOffline}
+                                            mode="compact"
+                                            timeRange={timeRange}
+                                            onTimeRangeChange={setTimeRange}
+                                        />
+                                    </ErrorBoundary>
                                 </div>
 
                                 {/* Bottom Middle: Sensor Status */}
@@ -1216,6 +1232,14 @@ export function PrivateDashboard() {
                                                     key={dev.device_id}
                                                     className="w-full flex cursor-pointer items-center justify-between rounded-lg border border-white/5 bg-white/[0.03] px-3 py-2 transition-all hover:bg-white/[0.06] group"
                                                     onClick={() => dev.location_id && handleLocationSelect(dev.location_id)}
+                                                    role="button"
+                                                    aria-label={`View status details for device ${dev.device_id}`}
+                                                    tabIndex={0}
+                                                    onKeyDown={(e) => {
+                                                        if (e.key === "Enter" || e.key === " ") {
+                                                            dev.location_id && handleLocationSelect(dev.location_id);
+                                                        }
+                                                    }}
                                                 >
                                                     <div className="flex items-center gap-3 min-w-0">
                                                         <div className="h-7 w-7 rounded-md bg-emerald-500/10 flex items-center justify-center border border-emerald-500/20 shrink-0">
@@ -1226,12 +1250,16 @@ export function PrivateDashboard() {
                                                             <div className="text-[8px] uppercase text-slate-500 truncate">{dev.type}</div>
                                                         </div>
                                                     </div>
-                                                    <div className={`flex items-center gap-1.5 px-2.5 py-0.5 rounded-full border text-[8px] font-bold uppercase shrink-0 ${dev.status?.toUpperCase() === 'ONLINE'
-                                                        ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/30'
-                                                        : 'bg-red-500/10 text-red-400 border-red-500/30'
-                                                        }`}>
+                                                    <div 
+                                                        role="status"
+                                                        aria-label={`${dev.device_id} is ${dev.status}`}
+                                                        className={`flex items-center gap-1.5 px-2.5 py-0.5 rounded-full border text-[8px] font-bold uppercase shrink-0 ${dev.status?.toUpperCase() === 'ONLINE'
+                                                            ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/30'
+                                                            : 'bg-red-500/10 text-red-400 border-red-500/30'
+                                                            }`}
+                                                    >
                                                         <div className={`h-1.5 w-1.5 rounded-full ${dev.status?.toUpperCase() === 'ONLINE' ? 'bg-emerald-500' : 'bg-red-500'}`} />
-                                                        {dev.status?.toUpperCase() === 'ONLINE' ? 'ONLINE' : 'OFFLINE'}
+                                                        {dev.status?.toUpperCase() === 'ONLINE' ? 'ONLINE ✓' : 'OFFLINE ⚠'}
                                                     </div>
                                                 </div>
                                             ))}
@@ -1239,15 +1267,17 @@ export function PrivateDashboard() {
                                     </div>
                                 </div>
 
-                                {/* Bottom Right: AI Summarizer (Fixed) */}
+                                {/* Bottom Right: AI Summarizer */}
                                 <div className="lg:col-start-3 lg:row-start-3 h-full flex flex-col overflow-hidden min-h-[250px] lg:min-h-0">
-                                    <AiSummarizerCard
-                                        waterData={safeWaterData}
-                                        isMotorOn={isMotorOn}
-                                        airData={safeAirData}
-                                        isWaterOffline={isWaterOffline}
-                                        isAirOffline={isAirOffline}
-                                    />
+                                    <ErrorBoundary title="AI Summary Agent">
+                                        <AiSummarizerCard
+                                            waterData={safeWaterData}
+                                            isMotorOn={isMotorOn}
+                                            airData={safeAirData}
+                                            isWaterOffline={isWaterOffline}
+                                            isAirOffline={isAirOffline}
+                                        />
+                                    </ErrorBoundary>
                                 </div>
 
                             </div>

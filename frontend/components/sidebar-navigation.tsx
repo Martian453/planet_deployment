@@ -155,24 +155,6 @@ export function SidebarNavigation({ isOpen, onToggle, activeView, onNavigate }: 
                 </li>
               )
             })}
-            {/* Register Device Item */}
-            <li>
-              <button
-                onClick={() => {
-                  setShowRegister(true);
-                  // onToggle(); // Keep open so they see modal
-                }}
-                className="group relative flex w-full items-center gap-3 rounded-xl px-4 py-3 text-left transition-all duration-300 text-emerald-400 hover:bg-emerald-500/10 border border-dashed border-emerald-500/30 hover:border-emerald-500/50"
-              >
-                <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-emerald-500/10 text-emerald-400 group-hover:bg-emerald-500/20 transition-all duration-300">
-                  <PlusCircle className="h-4 w-4" />
-                </div>
-                <div className="flex-1">
-                  <div className="text-sm font-bold">Register Device</div>
-                </div>
-              </button>
-            </li>
-
             {/* Download CSV Item */}
             <li>
               <button
@@ -184,21 +166,6 @@ export function SidebarNavigation({ isOpen, onToggle, activeView, onNavigate }: 
                 </div>
                 <div className="flex-1">
                   <div className="text-sm font-medium">Download CSV</div>
-                </div>
-              </button>
-            </li>
-
-            {/* Nearby Location Item */}
-            <li>
-              <button
-                onClick={handleNearbyClick}
-                className="group relative flex w-full items-center gap-3 rounded-xl px-4 py-3 text-left text-slate-400 hover:bg-white/5 hover:text-white transition-all duration-300"
-              >
-                <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-white/5 text-slate-500 group-hover:bg-white/10 group-hover:text-white transition-all duration-300">
-                  <Globe className="h-4 w-4" />
-                </div>
-                <div className="flex-1">
-                  <div className="text-sm font-medium">Nearby Location</div>
                 </div>
               </button>
             </li>
