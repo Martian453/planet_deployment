@@ -4,8 +4,7 @@ import { useState, useEffect } from "react"
 import { useRouter } from "next/navigation"
 import { useAuth } from "@/components/auth-provider";
 import { getApiBaseUrl } from "@/lib/api-url";
-import { LayoutDashboard, X, LogOut, Cpu, Download, PlusCircle, Globe } from "lucide-react"
-import { RegisterDeviceModal } from "./dashboard/register-device-modal"
+import { LayoutDashboard, X, LogOut, Cpu, Download } from "lucide-react"
 
 interface SidebarNavigationProps {
   isOpen: boolean;
@@ -18,12 +17,6 @@ export function SidebarNavigation({ isOpen, onToggle, activeView, onNavigate }: 
   const [mounted, setMounted] = useState(false);
   const router = useRouter();
   const { user, logout, token } = useAuth();
-  const [showRegister, setShowRegister] = useState(false);
-
-  const handleRegisterSuccess = () => {
-    // Force reload to refresh all data (cleanest way for MVP)
-    window.location.reload()
-  }
 
   // HYDRATION GUARD
   useEffect(() => {
@@ -52,12 +45,9 @@ export function SidebarNavigation({ isOpen, onToggle, activeView, onNavigate }: 
     if (itemId === "dashboard" || itemId === "devices") onToggle()
   }
 
-
-
   const handleDownloadCSV = async () => {
     if (!token) return;
     try {
-      // Use environment variable for API URL (works both locally and on production)
       const apiUrl = getApiBaseUrl();
       const exportUrl = `${apiUrl}/api/export/csv`;
 
@@ -83,15 +73,8 @@ export function SidebarNavigation({ isOpen, onToggle, activeView, onNavigate }: 
     }
   }
 
-  const handleNearbyClick = () => {
-    router.push("/public");
-    onToggle();
-  };
-
   return (
     <>
-
-
       {/* Backdrop Overlay */}
       <div
         className={`fixed inset-0 z-[150] bg-black/60 transition-all duration-300 ${isOpen ? "opacity-100 backdrop-blur-md" : "pointer-events-none opacity-0 backdrop-blur-none"
@@ -170,10 +153,6 @@ export function SidebarNavigation({ isOpen, onToggle, activeView, onNavigate }: 
               </button>
             </li>
           </ul>
-
-
-
-
         </nav>
 
         {/* User Footer */}
@@ -192,13 +171,6 @@ export function SidebarNavigation({ isOpen, onToggle, activeView, onNavigate }: 
           </div>
         </div>
       </aside>
-
-      {/* Registration Modal */}
-      <RegisterDeviceModal
-        isOpen={showRegister}
-        onClose={() => setShowRegister(false)}
-        onSuccess={handleRegisterSuccess}
-      />
     </>
   )
 }

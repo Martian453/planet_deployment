@@ -2,7 +2,7 @@
 const nextConfig = {
   output: 'export', // <--- Add this line
   typescript: {
-    ignoreBuildErrors: true,
+    ignoreBuildErrors: false,
   },
   images: {
     unoptimized: true,

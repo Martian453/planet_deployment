@@ -201,23 +201,6 @@ app.post('/api/control', requireDashboardAuth, validateControlPayload, (req, res
   });
 });
 
-// 4. Periodically Save Snapshots into History (Keep as fallback, but we now insert on ingest)
-const saveHistoricalSnapshot = () => {
-  db.all("SELECT * FROM borewell_state", (err, rows) => {
-    if (err) return console.error("History Error:", err.message);
-    if (!rows) return;
-    rows.forEach(row => {
-      db.run(`INSERT INTO readings_history 
-                (borewell_id, flow_rate, water_level, efficiency, voltage, current, ph, tds, turbidity, total_liters, current_status, water_status, turbidity_status, tds_status) 
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-        [row.id, row.flow_rate, row.water_level, row.efficiency, row.voltage, row.current, row.ph, row.tds, row.turbidity, row.total_liters, row.current_status, row.water_status, row.turbidity_status, row.tds_status]
-      );
-    });
-    console.log("📈 Periodic historical snapshot saved.");
-  });
-};
-setInterval(saveHistoricalSnapshot, 1000 * 60 * 5); // 5 minutes
-
 // 5. Receive Data from Heltec Gateway (Heltec -> Backend)
 app.post('/api/push', requireApiKey, validateWaterPayload, (req, res) => {
   const payload = req.body;
@@ -574,11 +557,6 @@ wss.on('connection', (ws, req) => {
   console.log('📱 Dashboard App Connected via WebSocket');
   clients.add(ws);
 
-  ws.on('close', () => {
-    clients.delete(ws);
-    console.log('❌ Dashboard Disconnected');
-  });
-
   // Small heartbeat to keep connection alive
   const heartbeat = setInterval(() => {
     if (ws.readyState === WebSocket.OPEN) {
@@ -586,8 +564,18 @@ wss.on('connection', (ws, req) => {
     }
   }, 10000);
 
-  ws.on('error', () => {
+  const cleanup = () => {
+    clearInterval(heartbeat);
     clients.delete(ws);
+  };
+
+  ws.on('close', () => {
+    cleanup();
+    console.log('❌ Dashboard Disconnected');
+  });
+
+  ws.on('error', () => {
+    cleanup();
   });
 });
 
