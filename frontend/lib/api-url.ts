@@ -7,9 +7,19 @@ export function getApiBaseUrl(): string {
     if (process.env.NEXT_PUBLIC_API_URL) {
         return process.env.NEXT_PUBLIC_API_URL;
     }
-    // In the browser, use the same hostname the page was loaded from
+    // In the browser, use the same hostname if local, otherwise default to production Render URL
     if (typeof window !== 'undefined') {
-        return `${window.location.protocol}//${window.location.hostname}:8000`;
+        const hostname = window.location.hostname;
+        if (
+            hostname === 'localhost' || 
+            hostname === '127.0.0.1' || 
+            hostname.startsWith('192.168.') || 
+            hostname.startsWith('10.') || 
+            hostname.startsWith('172.')
+        ) {
+            return `${window.location.protocol}//${hostname}:8000`;
+        }
+        return "https://planet-deployment.onrender.com";
     }
     // SSR fallback
     return "http://localhost:8000";
