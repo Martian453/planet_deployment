@@ -44,7 +44,8 @@ const pollutantConfig: Record<string, { color: string; label: string }> = {
 const waterMetricConfig: Record<string, { color: string; label: string }> = {
     level: { color: "#06b6d4", label: "Water Level" }, // Cyan 500
     ph: { color: "#10b981", label: "pH Level" },       // Emerald 500
-    tds: { color: "#f59e0b", label: "TDS" },// Amber 500
+    tds: { color: "#f59e0b", label: "TDS" },           // Amber 500
+    turbidity: { color: "#a855f7", label: "Turbidity" }, // Purple 500
 }
 
 export function ChartModal({
@@ -68,7 +69,7 @@ export function ChartModal({
         : Object.keys(pollutantConfig)
 
     // Filter water data based on selected metric
-    const waterMetrics = ["level", "ph", "tds"];
+    const waterMetrics = ["level", "ph", "tds", "turbidity"];
     const visibleWaterMetrics = selectedWaterMetric ? [selectedWaterMetric] : waterMetrics;
 
     if (!isOpen) return null;
@@ -254,10 +255,10 @@ export function ChartModal({
                         </div>
 
                         {/* Current Summary Tiles */}
-                        <div className="grid grid-cols-3 gap-4 mb-6">
+                        <div className="grid grid-cols-4 gap-4 mb-6">
                             {Object.entries(waterMetricConfig).map(([key, config]) => {
                                 const latestVal = data.length > 0 ? (data[data.length - 1] as any)[key] : 0;
-                                const unit = key === "level" ? "ft" : key === "tds" ? "ppm" : "";
+                                const unit = key === "level" ? "ft" : key === "tds" ? "ppm" : key === "turbidity" ? "NTU" : "";
                                 return (
                                     <div
                                         key={key}

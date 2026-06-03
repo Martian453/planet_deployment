@@ -63,7 +63,8 @@ app.get('/api/history/:id', requireDashboardAuth, (req, res) => {
 });
 
 app.get('/api/aqi/history', requireDashboardAuth, (req, res) => {
-  db.all('SELECT * FROM aqi_history ORDER BY timestamp DESC LIMIT 100', [], (err, rows) => {
+  const limit = parseInt(req.query.limit, 10) || 100;
+  db.all('SELECT * FROM aqi_history ORDER BY timestamp DESC LIMIT ?', [limit], (err, rows) => {
     if (err) return res.status(500).json({ error: err.message });
     res.json(rows.reverse());
   });
@@ -235,12 +236,12 @@ app.post('/api/push', requireApiKey, validateWaterPayload, (req, res) => {
     const isZeroWaterPayload = (phVal === 0 || phVal === 0.0) && (tdsVal === 0 || tdsVal === 0.0);
 
     // 1. Derive Voltage (v) based on Current (a)
-    let v = payload.v !== undefined ? safeFloat(payload.v) : (a > 0.5 ? (228.0 - (a * 0.4) + (Math.sin(Date.now() / 5000) * 1.5)) : (235.0 + (Math.sin(Date.now() / 10000) * 1.0)));
+    let v = payload.v !== undefined ? safeFloat(payload.v) : (a > 1.1 ? (228.0 - (a * 0.4) + (Math.sin(Date.now() / 5000) * 1.5)) : (235.0 + (Math.sin(Date.now() / 10000) * 1.0)));
     v = parseFloat(Number(v).toFixed(1));
 
     // 2. Derive Pump Efficiency (eff)
     let eff = payload.eff !== undefined ? safeFloat(payload.eff) : 0.0;
-    if (payload.eff === undefined && a > 0.5 && flow > 0) {
+    if (payload.eff === undefined && a > 1.1 && flow > 0) {
       eff = Math.min(92, Math.max(50, Math.round((flow * 14.5) / a)));
     }
 
@@ -250,7 +251,7 @@ app.post('/api/push', requireApiKey, validateWaterPayload, (req, res) => {
       wl = current_state.water_level !== undefined ? current_state.water_level : 5.5;
     } else if (wl === null) {
       let last_wl = current_state.water_level !== undefined ? current_state.water_level : 5.5;
-      if (a > 0.5 && flow > 0) {
+      if (a > 1.1 && flow > 0) {
         // Drawdown: Water level decreases as we pump it out
         wl = Math.max(1.2, last_wl - 0.02 * (flow / 40.0));
       } else {
@@ -264,7 +265,7 @@ app.post('/api/push', requireApiKey, validateWaterPayload, (req, res) => {
     let rt = payload.rt !== undefined ? safeFloat(payload.rt) : null;
     if (rt === null) {
       let last_rt = current_state.run_time_total !== undefined ? current_state.run_time_total : 0.0;
-      if (a > 0.5) {
+      if (a > 1.1) {
         let deltaHours = 1.0 / 3600.0;
         if (current_state.last_updated) {
           const lastTime = new Date(current_state.last_updated + " UTC").getTime();
@@ -293,8 +294,8 @@ app.post('/api/push', requireApiKey, validateWaterPayload, (req, res) => {
     const turbidity_status = isZeroWaterPayload ? (current_state.turbidity_status || 'CLEAR') : (payload.turbidity_status !== undefined ? payload.turbidity_status : (current_state.turbidity_status !== undefined ? current_state.turbidity_status : 'CLEAR'));
     const tds_status = isZeroWaterPayload ? (current_state.tds_status || 'GOOD') : (payload.tds_status !== undefined ? payload.tds_status : (current_state.tds_status !== undefined ? current_state.tds_status : 'GOOD'));
 
-    // Derive motor status: ON if current (amps) > 0.5A, else OFF
-    const is_motor_on = a > 0.5 ? 1 : 0;
+    // Derive motor status: ON if current (amps) > 1.1A, else OFF
+    const is_motor_on = a > 1.1 ? 1 : 0;
 
     // Perform database UPDATE of live state
     db.run(`UPDATE borewell_state SET 

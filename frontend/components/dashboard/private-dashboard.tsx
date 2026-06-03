@@ -154,14 +154,17 @@ export function PrivateDashboard() {
 
 
     const now = currentTime;
-    const isAirOnline = lastAirTime > 0 && (now - lastAirTime < 300000);
-    const isWaterOnline = lastWaterTime > 0 && (now - lastWaterTime < 300000);
+    const isAirOnline = lastAirTime > 0 && (now - lastAirTime < 30000);
+    const isWaterOnline = lastWaterTime > 0 && (now - lastWaterTime < 30000);
 
     const isAirOffline = !isAirOnline;
     const isWaterOffline = !isWaterOnline;
 
     const isMotorOn = !isWaterOffline && (borewells[activeBorewellIndex]?.isMotorOn || false);
     const motorRunTime = borewells[activeBorewellIndex]?.runTime || 0;
+
+    // Dynamic history limit based on active time range — prevents live data from truncating historical views
+    const historyLimit = timeRange === "1h" ? 100 : timeRange === "24h" ? 300 : 1000;
 
     // Status Logic
     let locationStatus: "ONLINE" | "PARTIAL" | "OFFLINE" = "OFFLINE";
@@ -363,14 +366,14 @@ export function PrivateDashboard() {
                             ...latest,
                             chartData: {
                                 ...currentChart,
-                                labels: [...currentChart.labels, timeLabel].slice(-100),
-                                pm25: [...currentChart.pm25, latest.pm25].slice(-100),
-                                pm10: [...currentChart.pm10, latest.pm10].slice(-100),
-                                co2: [...currentChart.co2, latest.co2].slice(-100),
-                                tvoc: [...currentChart.tvoc, latest.tvoc].slice(-100),
-                                hcho: [...currentChart.hcho, latest.hcho].slice(-100),
-                                temp: [...currentChart.temp, latest.temp].slice(-100),
-                                humidity: [...currentChart.humidity, latest.humidity].slice(-100)
+                                labels: [...currentChart.labels, timeLabel].slice(-historyLimit),
+                                pm25: [...currentChart.pm25, latest.pm25].slice(-historyLimit),
+                                pm10: [...currentChart.pm10, latest.pm10].slice(-historyLimit),
+                                co2: [...currentChart.co2, latest.co2].slice(-historyLimit),
+                                tvoc: [...currentChart.tvoc, latest.tvoc].slice(-historyLimit),
+                                hcho: [...currentChart.hcho, latest.hcho].slice(-historyLimit),
+                                temp: [...currentChart.temp, latest.temp].slice(-historyLimit),
+                                humidity: [...currentChart.humidity, latest.humidity].slice(-historyLimit)
                             }
                         };
                     });
@@ -408,11 +411,11 @@ export function PrivateDashboard() {
                                 setLastWaterTime(lastTime);
                                 if (!isDbZero) {
                                     const timeLabel = new Date(lastTime).toLocaleTimeString('en-US', { hour12: false, hour: '2-digit', minute: '2-digit' });
-                                    newLabels = [...currentChart.labels, timeLabel].slice(-100);
-                                    newLevelArr = [...currentChart.level, active.water_level ?? prev?.level ?? 0].slice(-100);
-                                    newPhArr = [...currentChart.ph, active.ph ?? prev?.ph ?? 7.2].slice(-100);
-                                    newTdsArr = [...currentChart.tds, active.tds ?? prev?.tds ?? 250].slice(-100);
-                                    newTurbidityArr = [...(currentChart.turbidity || []), active.turbidity ?? prev?.turbidity ?? 1.2].slice(-100);
+                                    newLabels = [...currentChart.labels, timeLabel].slice(-historyLimit);
+                                    newLevelArr = [...currentChart.level, active.water_level ?? prev?.level ?? 0].slice(-historyLimit);
+                                    newPhArr = [...currentChart.ph, active.ph ?? prev?.ph ?? 7.2].slice(-historyLimit);
+                                    newTdsArr = [...currentChart.tds, active.tds ?? prev?.tds ?? 250].slice(-historyLimit);
+                                    newTurbidityArr = [...(currentChart.turbidity || []), active.turbidity ?? prev?.turbidity ?? 1.2].slice(-historyLimit);
                                 }
                             }
 
@@ -483,7 +486,7 @@ export function PrivateDashboard() {
             setAirData(prev => {
                 const currentChart = prev?.chartData || { labels: [], pm25: [], pm10: [], co2: [], tvoc: [], hcho: [], temp: [], humidity: [] };
                 const timeLabel = new Date().toLocaleTimeString('en-US', { hour12: false, hour: '2-digit', minute: '2-digit' });
-                const newLabels = [...currentChart.labels, timeLabel].slice(-100);
+                const newLabels = [...currentChart.labels, timeLabel].slice(-historyLimit);
 
                 setLastAirTime(Date.now()); // Update last seen for Air
 
@@ -497,13 +500,13 @@ export function PrivateDashboard() {
                     humidity: wsData.data.humidity,
                     chartData: {
                         labels: newLabels,
-                        pm25: [...currentChart.pm25, wsData.data.pm25].slice(-100),
-                        pm10: [...currentChart.pm10, wsData.data.pm10].slice(-100),
-                        co2: [...currentChart.co2, wsData.data.co2].slice(-100),
-                        tvoc: [...currentChart.tvoc, wsData.data.tvoc].slice(-100),
-                        hcho: [...currentChart.hcho, wsData.data.hcho].slice(-100),
-                        temp: [...currentChart.temp, wsData.data.temp].slice(-100),
-                        humidity: [...currentChart.humidity, wsData.data.humidity].slice(-100)
+                        pm25: [...currentChart.pm25, wsData.data.pm25].slice(-historyLimit),
+                        pm10: [...currentChart.pm10, wsData.data.pm10].slice(-historyLimit),
+                        co2: [...currentChart.co2, wsData.data.co2].slice(-historyLimit),
+                        tvoc: [...currentChart.tvoc, wsData.data.tvoc].slice(-historyLimit),
+                        hcho: [...currentChart.hcho, wsData.data.hcho].slice(-historyLimit),
+                        temp: [...currentChart.temp, wsData.data.temp].slice(-historyLimit),
+                        humidity: [...currentChart.humidity, wsData.data.humidity].slice(-historyLimit)
                     }
                 };
             });
@@ -521,7 +524,7 @@ export function PrivateDashboard() {
 
             // 1. Process status updates for ALL borewells so their states remain correct
             // Force motor state to OFF if a zero-value packet is received
-            const isIncomingMotorOn = !isZeroWater && (incoming.status === 'ON' || (incomingIrms !== undefined && incomingIrms > 0.2));
+            const isIncomingMotorOn = !isZeroWater && (incoming.status === 'ON' || (incomingIrms !== undefined && incomingIrms > 1.1));
             if (hasPumpData || isZeroWater) {
                 setBorewells(prev => prev.map(bw => {
                     if (bw.id === incomingId) {
@@ -560,11 +563,11 @@ export function PrivateDashboard() {
                 // Only append to the chart history if this was a water tank reading
                 if (hasTankData) {
                     const timeLabel = new Date().toLocaleTimeString('en-US', { hour12: false, hour: '2-digit', minute: '2-digit' });
-                    newLabels = [...currentChart.labels, timeLabel].slice(-100);
-                    newLevelArr = [...currentChart.level, incomingLevel ?? prev?.level ?? 4.5].slice(-100);
-                    newPhArr = [...currentChart.ph, incoming.ph ?? prev?.ph ?? 7.2].slice(-100);
-                    newTdsArr = [...currentChart.tds, incoming.tds ?? prev?.tds ?? 250].slice(-100);
-                    newTurbidityArr = [...(currentChart.turbidity || []), incoming.turbidity ?? prev?.turbidity ?? 1.2].slice(-100);
+                    newLabels = [...currentChart.labels, timeLabel].slice(-historyLimit);
+                    newLevelArr = [...currentChart.level, incomingLevel ?? prev?.level ?? 4.5].slice(-historyLimit);
+                    newPhArr = [...currentChart.ph, incoming.ph ?? prev?.ph ?? 7.2].slice(-historyLimit);
+                    newTdsArr = [...currentChart.tds, incoming.tds ?? prev?.tds ?? 250].slice(-historyLimit);
+                    newTurbidityArr = [...(currentChart.turbidity || []), incoming.turbidity ?? prev?.turbidity ?? 1.2].slice(-historyLimit);
 
                     // Offline heartbeat update ONLY if it's a valid tank reading
                     const isZeroWater = (incomingLevel === 0 || incomingLevel === undefined) && incoming.ph === 0 && incoming.tds === 0;
@@ -706,7 +709,7 @@ export function PrivateDashboard() {
                 const humidity = clamp(nextRandomWalk(p.humidity, 1, 10, 95), 10, 95);
 
                 const c = p.chartData ?? { labels: [], pm25: [], pm10: [], co2: [], tvoc: [], hcho: [], temp: [], humidity: [] };
-                const newLabels = [...c.labels, label].slice(-100);
+                const newLabels = [...c.labels, label].slice(-historyLimit);
 
                 setLastAirTime(Date.now());
 
@@ -714,13 +717,13 @@ export function PrivateDashboard() {
                     pm25, pm10, co2, tvoc, hcho, temp, humidity,
                     chartData: {
                         labels: newLabels,
-                        pm25: [...c.pm25, pm25].slice(-100),
-                        pm10: [...c.pm10, pm10].slice(-100),
-                        co2: [...c.co2, co2].slice(-100),
-                        tvoc: [...c.tvoc, tvoc].slice(-100),
-                        hcho: [...c.hcho, hcho].slice(-100),
-                        temp: [...c.temp, temp].slice(-100),
-                        humidity: [...c.humidity, humidity].slice(-100),
+                        pm25: [...c.pm25, pm25].slice(-historyLimit),
+                        pm10: [...c.pm10, pm10].slice(-historyLimit),
+                        co2: [...c.co2, co2].slice(-historyLimit),
+                        tvoc: [...c.tvoc, tvoc].slice(-historyLimit),
+                        hcho: [...c.hcho, hcho].slice(-historyLimit),
+                        temp: [...c.temp, temp].slice(-historyLimit),
+                        humidity: [...c.humidity, humidity].slice(-historyLimit),
                     }
                 };
             });
@@ -757,15 +760,15 @@ export function PrivateDashboard() {
                 setLastWaterTime(Date.now());
 
                 const c = p.chartData ?? { labels: [], level: [], ph: [], tds: [] };
-                const newLabels = [...c.labels, label].slice(-100);
+                const newLabels = [...c.labels, label].slice(-historyLimit);
 
                 return {
                     level, ph, tds, irms, pump_status,
                     chartData: {
                         labels: newLabels,
-                        level: [...c.level, level].slice(-100),
-                        ph: [...c.ph, ph].slice(-100),
-                        tds: [...c.tds, tds].slice(-100),
+                        level: [...c.level, level].slice(-historyLimit),
+                        ph: [...c.ph, ph].slice(-historyLimit),
+                        tds: [...c.tds, tds].slice(-historyLimit),
                     }
                 };
             });
@@ -898,7 +901,8 @@ export function PrivateDashboard() {
                 .catch(err => console.warn(`Failed to fetch history for ${activeId}:`, err));
         }
 
-        apiClient(`/api/aqi/history`, { token })
+        const aqiLimit = timeRange === "1h" ? 100 : timeRange === "24h" ? 300 : 1000;
+        apiClient(`/api/aqi/history?limit=${aqiLimit}`, { token })
             .then(history => {
                 if (Array.isArray(history)) {
                     if (history.length > 0) {
@@ -1041,6 +1045,7 @@ export function PrivateDashboard() {
                 level: safeWaterData.chartData.level[i],
                 ph: safeWaterData.chartData.ph[i],
                 tds: safeWaterData.chartData.tds[i],
+                turbidity: (safeWaterData.chartData as any).turbidity?.[i] ?? 0,
             }));
         }
         return [];
