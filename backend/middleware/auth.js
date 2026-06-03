@@ -54,6 +54,23 @@ function requireApiKey(req, res, next) {
 }
 
 const db = require('../db');
+const crypto = require('crypto');
+
+const secret = process.env.SESSION_SECRET || 'fallback-secret-for-session-signing-1234';
+
+function verifyToken(token) {
+  try {
+    const raw = Buffer.from(token, 'base64').toString('ascii');
+    const [payloadStr, signature] = raw.split('.');
+    const expectedSignature = crypto.createHmac('sha256', secret).update(payloadStr).digest('hex');
+    if (signature !== expectedSignature) return null;
+    const payload = JSON.parse(payloadStr);
+    if (Date.now() > payload.expires) return null;
+    return payload;
+  } catch (e) {
+    return null;
+  }
+}
 
 /**
  * Middleware: Require a valid bearer token for dashboard endpoints.
@@ -79,26 +96,55 @@ function requireDashboardAuth(req, res, next) {
         return next();
     }
 
-    // 2. Dynamic base64 token validation against users table
+    // 2. Cryptographic session token verification
+    const session = verifyToken(token);
+    if (session) {
+        db.get('SELECT id, email, full_name FROM users WHERE id = ?', [session.userId], (err, user) => {
+            if (err || !user) {
+                return res.status(403).json({ error: 'Access denied: User account not found.' });
+            }
+            req.user = user;
+            next();
+        });
+        return;
+    }
+
+    // 3. Fallback for legacy base64 token validation against users table
     try {
         const decoded = Buffer.from(token, 'base64').toString('ascii').split(':');
         const email = decoded[0];
         const password = decoded[1];
 
-        if (!email || !password) {
-            return res.status(403).json({ error: 'Invalid authentication credentials.' });
-        }
+        if (email && password) {
+            db.get('SELECT id, email, password, full_name FROM users WHERE email = ?', [email], (err, user) => {
+                if (err || !user) {
+                    return res.status(403).json({ error: 'Access denied: Invalid credentials.' });
+                }
+                
+                const storedPassword = user.password;
+                let passwordMatched = false;
+                if (storedPassword.includes(':')) {
+                    const [salt, hash] = storedPassword.split(':');
+                    const checkHash = crypto.pbkdf2Sync(password, salt, 10000, 64, 'sha512').toString('hex');
+                    passwordMatched = (checkHash === hash);
+                } else {
+                    passwordMatched = (storedPassword === password);
+                }
 
-        db.get('SELECT id, email, full_name FROM users WHERE email = ? AND password = ?', [email, password], (err, user) => {
-            if (err || !user) {
-                return res.status(403).json({ error: 'Access denied: Invalid credentials or account unregistered.' });
-            }
-            req.user = user; // Bind user context
-            next();
-        });
+                if (!passwordMatched) {
+                    return res.status(403).json({ error: 'Access denied: Incorrect password.' });
+                }
+                
+                req.user = { id: user.id, email: user.email, full_name: user.full_name };
+                next();
+            });
+            return;
+        }
     } catch (e) {
-        return res.status(403).json({ error: 'Malformed access token.' });
+        // Ignore fallback parsing errors
     }
+
+    return res.status(403).json({ error: 'Malformed or expired access token.' });
 }
 
-module.exports = { requireApiKey, requireDashboardAuth };
+module.exports = { requireApiKey, requireDashboardAuth, verifyToken };

@@ -32,6 +32,11 @@ setInterval(() => {
 }, 600000);
 
 function rateLimiter(req, res, next) {
+  // Exempt device telemetry ingestion from rate limiting (already authenticated via API key)
+  if (req.path === '/api/push' || req.path === '/api/aqi') {
+    return next();
+  }
+
   const ip = req.headers['x-forwarded-for'] || req.socket.remoteAddress;
   const now = Date.now();
 

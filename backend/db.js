@@ -1,5 +1,12 @@
 const sqlite3 = require('sqlite3').verbose();
 const path = require('path');
+const crypto = require('crypto');
+
+function hashPassword(password, salt) {
+  const finalSalt = salt || crypto.randomBytes(16).toString('hex');
+  const hash = crypto.pbkdf2Sync(password, finalSalt, 10000, 64, 'sha512').toString('hex');
+  return `${finalSalt}:${hash}`;
+}
 
 const dbPath = process.env.SQLITE_DB_PATH || path.join(__dirname, 'environment.db');
 const db = new sqlite3.Database(dbPath);
@@ -24,7 +31,8 @@ db.serialize(() => {
 
   db.get("SELECT COUNT(*) as count FROM users WHERE email = 'trifecta'", (err, row) => {
     if (row && row.count === 0) {
-      db.run("INSERT INTO users (email, password, full_name) VALUES ('trifecta', '12345', 'Trifecta Admin')");
+      const hashedPassword = hashPassword('12345');
+      db.run("INSERT INTO users (email, password, full_name) VALUES ('trifecta', ?, 'Trifecta Admin')", [hashedPassword]);
     }
   });
 
@@ -136,5 +144,20 @@ db.serialize(() => {
     }
   });
 });
+
+// Automatically prune readings older than 30 days to prevent unbounded SQLite file growth.
+// Runs every 6 hours.
+const PRUNE_INTERVAL_MS = 6 * 60 * 60 * 1000;
+setInterval(() => {
+  console.log('🧹 Running database cleanup job...');
+  db.run("DELETE FROM readings_history WHERE timestamp < datetime('now', '-30 days')", (err) => {
+    if (err) console.error('⚠️  Failed to prune readings_history:', err.message);
+    else console.log('✅ readings_history pruned successfully.');
+  });
+  db.run("DELETE FROM aqi_history WHERE timestamp < datetime('now', '-30 days')", (err) => {
+    if (err) console.error('⚠️  Failed to prune aqi_history:', err.message);
+    else console.log('✅ aqi_history pruned successfully.');
+  });
+}, PRUNE_INTERVAL_MS);
 
 module.exports = db;

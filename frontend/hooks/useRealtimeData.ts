@@ -13,89 +13,102 @@ export function useRealtimeData(locationId: string, token: string | null) {
     const [data, setData] = useState<RealtimeData | null>(null);
     const [isConnected, setIsConnected] = useState(false);
     const [isLive, setIsLive] = useState(false);
-    const wsRef = useRef<WebSocket | null>(null);
-
+    const [isOffline, setIsOffline] = useState(true);
     const [lastMessageTime, setLastMessageTime] = useState<number | null>(null);
-    const lastMessageRef = useRef<number>(0);
 
-    // Timeout check loop
-    useEffect(() => {
-        const interval = setInterval(() => {
-            const now = Date.now();
-            if (lastMessageRef.current > 0 && now - lastMessageRef.current < 20000) {
-                if (!isLive) setIsLive(true);
-            } else {
-                if (isLive) setIsLive(false);
-            }
-        }, 1000);
-        return () => clearInterval(interval);
-    }, [isLive]);
+    const wsRef = useRef<WebSocket | null>(null);
+    const lastMessageRef = useRef<number>(0);
+    const reconnectTimeoutRef = useRef<NodeJS.Timeout | null>(null);
 
     useEffect(() => {
         if (!locationId) {
             setIsLive(false);
+            setIsOffline(true);
             return;
         }
 
         const apiBase = getApiBaseUrl();
         const wsBase = apiBase.replace(/^http/, "ws"); // http->ws, https->wss
-        // Connect to the root of the backend WS server (matching server.js setup)
-        const wsUrl = `${wsBase}`;
-        console.log(`🔌 Connecting to WS: ${wsUrl}`);
+        const tokenQuery = token ? `?token=${encodeURIComponent(token)}` : "";
+        const wsUrl = `${wsBase}${tokenQuery}`;
 
-        const ws = new WebSocket(wsUrl);
-        wsRef.current = ws;
+        let reconnectAttempts = 0;
 
-        ws.onopen = () => {
-            console.log("✅ WebSocket Connected");
-            setIsConnected(true);
-        };
+        const connect = () => {
+            console.log(`🔌 Connecting to WS: ${wsUrl}`);
+            const ws = new WebSocket(wsUrl);
+            wsRef.current = ws;
 
-        ws.onmessage = (event) => {
-            try {
-                const payload: RealtimeData = JSON.parse(event.data);
-                // console.log("📩 Received Real-Time Data:", payload);
+            ws.onopen = () => {
+                console.log("✅ WebSocket Connected");
+                setIsConnected(true);
+                reconnectAttempts = 0;
+            };
 
-                // Update heartbeat
-                lastMessageRef.current = Date.now();
-                setLastMessageTime(Date.now());
-                setIsLive(true); // Immediate feedback
+            ws.onmessage = (event) => {
+                try {
+                    const payload: RealtimeData = JSON.parse(event.data);
+                    
+                    lastMessageRef.current = Date.now();
+                    setLastMessageTime(Date.now());
+                    setIsLive(true);
+                    setIsOffline(false);
 
-                if (payload.type !== 'heartbeat') {
-                    setData(payload);
+                    if (payload.type !== 'heartbeat') {
+                        setData(payload);
+                    }
+                } catch (err) {
+                    console.error("❌ Error parsing WS message:", err);
                 }
-            } catch (err) {
-                console.error("❌ Error parsing WS message:", err);
-            }
+            };
+
+            ws.onclose = () => {
+                console.log("❌ WebSocket Disconnected");
+                setIsConnected(false);
+                setIsLive(false);
+
+                // Queue auto-reconnect with exponential backoff (max 30s)
+                const delay = Math.min(3000 * Math.pow(2, reconnectAttempts), 30000);
+                reconnectAttempts++;
+                console.log(`🔄 Attempting reconnect in ${delay}ms...`);
+                reconnectTimeoutRef.current = setTimeout(connect, delay);
+            };
+
+            ws.onerror = (err) => {
+                console.error("WebSocket error observed:", err);
+                ws.close();
+            };
         };
 
-        ws.onclose = () => {
-            console.log("❌ WebSocket Disconnected");
-            setIsConnected(false);
-            setIsLive(false);
-        };
+        connect();
 
         return () => {
-            ws.close();
+            if (wsRef.current) {
+                wsRef.current.close();
+            }
+            if (reconnectTimeoutRef.current) {
+                clearTimeout(reconnectTimeoutRef.current);
+            }
         };
     }, [locationId, token]);
 
-    // STABILITY: Pure Client-Side Offline Detection
-    const [isOffline, setIsOffline] = useState(true);
-
+    // Single consolidated liveness checker
     useEffect(() => {
-        const checkOffline = () => {
+        const checkLiveness = () => {
+            const now = Date.now();
             if (!lastMessageRef.current) {
+                setIsLive(false);
                 setIsOffline(true);
                 return;
             }
-            const diff = Date.now() - lastMessageRef.current;
-            setIsOffline(diff > 30000); // 30s strict timeout
-            setIsLive(diff < 30000);
+            const diff = now - lastMessageRef.current;
+            const offlineThreshold = 20000; // 20s
+            setIsLive(diff < offlineThreshold);
+            setIsOffline(diff >= offlineThreshold);
         };
 
-        const interval = setInterval(checkOffline, 2000); // Check every 2s
-        checkOffline();
+        const interval = setInterval(checkLiveness, 2000); // Check every 2s
+        checkLiveness();
 
         return () => clearInterval(interval);
     }, []);

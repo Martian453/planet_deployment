@@ -132,6 +132,10 @@ export function PrivateDashboard() {
         lastAirTimeRef.current = lastAirTime;
     }, [lastAirTime]);
     const [lastWaterTime, setLastWaterTime] = useState(0);
+    const lastWaterTimeRef = useRef(0);
+    useEffect(() => {
+        lastWaterTimeRef.current = lastWaterTime;
+    }, [lastWaterTime]);
     const [currentTime, setCurrentTime] = useState(Date.now());
 
     // Update 'currentTime' every 5 seconds for offline calc AND increment motor timers for all ON units
@@ -342,7 +346,7 @@ export function PrivateDashboard() {
             if (typeof document !== "undefined" && document.hidden) return;
 
             try {
-                // Fetch latest AQI
+                // 1. Fetch latest AQI
                 const history = await apiClient("/api/aqi/history?limit=1", { token, showErrorToast: false });
                 if (history && history.length > 0) {
                     const latest = history[history.length - 1];
@@ -371,6 +375,75 @@ export function PrivateDashboard() {
                         };
                     });
                 }
+
+                // 2. Fetch latest Borewell & Water levels state
+                const bwData = await apiClient<any[]>("/api/borewells", { token, showErrorToast: false });
+                if (Array.isArray(bwData)) {
+                    const sortedBw = bwData
+                        .map(bw => ({
+                            id: bw.id,
+                            isMotorOn: bw.is_motor_on === 1,
+                            runTime: bw.run_time_total
+                        }))
+                        .sort((a, b) => a.id.localeCompare(b.id));
+                    setBorewells(sortedBw);
+
+                    const activeId = sortedBw[activeBorewellIndex]?.id;
+                    const active = bwData.find(bw => bw.id === activeId);
+                    if (active) {
+                        const isDbZero = active.ph === 0 && active.tds === 0 && (active.water_level === 0 || active.water_level === null);
+                        setWaterData(prev => {
+                            const utcStr = active.last_updated ? active.last_updated.replace(' ', 'T') + 'Z' : '';
+                            const lastTime = new Date(utcStr).getTime();
+                            const isNew = !isNaN(lastTime) && lastTime > lastWaterTimeRef.current;
+                            
+                            const currentChart = prev?.chartData || { labels: [], level: [], ph: [], tds: [], turbidity: [] };
+                            let newLabels = currentChart.labels;
+                            let newLevelArr = currentChart.level;
+                            let newPhArr = currentChart.ph;
+                            let newTdsArr = currentChart.tds;
+                            let newTurbidityArr = currentChart.turbidity || [];
+
+                            if (isNew) {
+                                setLastWaterTime(lastTime);
+                                if (!isDbZero) {
+                                    const timeLabel = new Date(lastTime).toLocaleTimeString('en-US', { hour12: false, hour: '2-digit', minute: '2-digit' });
+                                    newLabels = [...currentChart.labels, timeLabel].slice(-100);
+                                    newLevelArr = [...currentChart.level, active.water_level ?? prev?.level ?? 0].slice(-100);
+                                    newPhArr = [...currentChart.ph, active.ph ?? prev?.ph ?? 7.2].slice(-100);
+                                    newTdsArr = [...currentChart.tds, active.tds ?? prev?.tds ?? 250].slice(-100);
+                                    newTurbidityArr = [...(currentChart.turbidity || []), active.turbidity ?? prev?.turbidity ?? 1.2].slice(-100);
+                                }
+                            }
+
+                            return {
+                                ...prev,
+                                level: isDbZero ? (prev?.level ?? 0) : (active.water_level ?? prev?.level ?? 0),
+                                ph: isDbZero ? (prev?.ph ?? 7.2) : (active.ph || prev?.ph || 7.2),
+                                tds: isDbZero ? (prev?.tds ?? 250) : (active.tds || prev?.tds || 250),
+                                irms: active.current ?? prev?.irms ?? 0,
+                                flowRate: active.flow_rate ?? prev?.flowRate ?? 0,
+                                efficiency: active.efficiency ?? prev?.efficiency ?? 0,
+                                voltage: active.voltage ?? prev?.voltage ?? 0,
+                                runTime: active.run_time_total ?? prev?.runTime ?? 0,
+                                turbidity: isDbZero ? (prev?.turbidity ?? 1.2) : (active.turbidity || prev?.turbidity || 1.2),
+                                pump_status: active.current_status || (active.is_motor_on ? "MID" : "OFF"),
+                                totalLiters: active.total_liters ?? prev?.totalLiters,
+                                currentStatus: active.current_status,
+                                waterStatus: active.water_status,
+                                turbidityStatus: active.turbidity_status,
+                                tdsStatus: active.tds_status,
+                                chartData: {
+                                    labels: newLabels,
+                                    level: newLevelArr,
+                                    ph: newPhArr,
+                                    tds: newTdsArr,
+                                    turbidity: newTurbidityArr
+                                }
+                            } as any;
+                        });
+                    }
+                }
             } catch (err) {
                 console.warn("Live data poll failed", err);
             }
@@ -379,7 +452,7 @@ export function PrivateDashboard() {
         const interval = setInterval(fetchLatestData, 5000); // 5s fallback
         fetchLatestData(); // Fetch once immediately
         return () => clearInterval(interval);
-    }, [demoMode, token]);
+    }, [demoMode, token, activeBorewellIndex]);
 
     const handleDeleteDevice = async (deviceId: string, e: React.MouseEvent) => {
         e.stopPropagation(); // Prevent card click
@@ -435,7 +508,7 @@ export function PrivateDashboard() {
                 };
             });
         } else if (wsData && (wsData.type === 'water' || wsData.type === 'water_sensor')) {
-            const incomingId = 'BW-01'; // Force all incoming water data to Borewell 1 (BW-01)
+            const incomingId = (wsData as any).id || 'BW-01';
             const activeId = borewells[activeBorewellIndex]?.id;
 
             const incoming = wsData.data as any;
@@ -751,14 +824,18 @@ export function PrivateDashboard() {
         apiClient("/api/borewells", { token })
             .then(data => {
                 if (Array.isArray(data)) {
-                    setBorewells(data.map(bw => ({
-                        id: bw.id,
-                        isMotorOn: bw.is_motor_on === 1,
-                        runTime: bw.run_time_total
-                    })));
+                    const sortedBw = data
+                        .map(bw => ({
+                            id: bw.id,
+                            isMotorOn: bw.is_motor_on === 1,
+                            runTime: bw.run_time_total
+                        }))
+                        .sort((a, b) => a.id.localeCompare(b.id));
+                    setBorewells(sortedBw);
 
                     // Update current water data with latest values from DB
-                    const active = data[activeBorewellIndex];
+                    const activeId = sortedBw[activeBorewellIndex]?.id;
+                    const active = data.find(bw => bw.id === activeId);
                     if (active) {
                         if (active.last_updated) {
                             const utcStr = active.last_updated.replace(' ', 'T') + 'Z';

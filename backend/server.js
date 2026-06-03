@@ -46,7 +46,7 @@ app.get('/api/health', (req, res) => {
 
 // 1. Get Live State (Restores values on Page Load)
 app.get('/api/borewells', requireDashboardAuth, (req, res) => {
-  db.all("SELECT * FROM borewell_state", (err, rows) => {
+  db.all("SELECT * FROM borewell_state ORDER BY id ASC", (err, rows) => {
     if (err) return res.status(500).json({ error: err.message });
     res.json(rows);
   });
@@ -446,6 +446,35 @@ app.post('/api/aqi', requireApiKey, validateAqiPayload, (req, res) => {
 
 // --- AUTHENTICATION ENDPOINTS ---
 
+const crypto = require('crypto');
+const secret = process.env.SESSION_SECRET || 'fallback-secret-for-session-signing-1234';
+
+function hashPassword(password, salt) {
+  const finalSalt = salt || crypto.randomBytes(16).toString('hex');
+  const hash = crypto.pbkdf2Sync(password, finalSalt, 10000, 64, 'sha512').toString('hex');
+  return `${finalSalt}:${hash}`;
+}
+
+function generateToken(userId, email) {
+  const payload = JSON.stringify({ userId, email, expires: Date.now() + 24 * 3600 * 1000 });
+  const signature = crypto.createHmac('sha256', secret).update(payload).digest('hex');
+  return Buffer.from(`${payload}.${signature}`).toString('base64');
+}
+
+function verifyToken(token) {
+  try {
+    const raw = Buffer.from(token, 'base64').toString('ascii');
+    const [payloadStr, signature] = raw.split('.');
+    const expectedSignature = crypto.createHmac('sha256', secret).update(payloadStr).digest('hex');
+    if (signature !== expectedSignature) return null;
+    const payload = JSON.parse(payloadStr);
+    if (Date.now() > payload.expires) return null;
+    return payload;
+  } catch (e) {
+    return null;
+  }
+}
+
 // 1. User login (supports URL encoded form data)
 app.post('/api/auth/login', (req, res) => {
   const email = req.body.username;
@@ -455,7 +484,7 @@ app.post('/api/auth/login', (req, res) => {
     return res.status(400).json({ detail: "Username and password required." });
   }
 
-  db.get('SELECT id, email, full_name FROM users WHERE email = ? AND password = ?', [email, password], (err, user) => {
+  db.get('SELECT id, email, password, full_name FROM users WHERE email = ?', [email], (err, user) => {
     if (err) {
       console.error('Login error:', err);
       return res.status(500).json({ detail: "Internal database login error." });
@@ -464,7 +493,21 @@ app.post('/api/auth/login', (req, res) => {
       return res.status(401).json({ detail: "Incorrect username or password." });
     }
 
-    const token = Buffer.from(`${email}:${password}`).toString('base64');
+    const storedPassword = user.password;
+    let passwordMatched = false;
+    if (storedPassword.includes(':')) {
+      const [salt, hash] = storedPassword.split(':');
+      const checkHash = crypto.pbkdf2Sync(password, salt, 10000, 64, 'sha512').toString('hex');
+      passwordMatched = (checkHash === hash);
+    } else {
+      passwordMatched = (storedPassword === password);
+    }
+
+    if (!passwordMatched) {
+      return res.status(401).json({ detail: "Incorrect username or password." });
+    }
+
+    const token = generateToken(user.id, user.email);
     res.json({ access_token: token });
   });
 });
@@ -477,7 +520,9 @@ app.post('/api/auth/register', (req, res) => {
     return res.status(400).json({ detail: "Username and password required." });
   }
 
-  db.run('INSERT INTO users (email, password, full_name) VALUES (?, ?, ?)', [email, password, full_name || email], function(err) {
+  const hashedPassword = hashPassword(password);
+
+  db.run('INSERT INTO users (email, password, full_name) VALUES (?, ?, ?)', [email, hashedPassword, full_name || email], function(err) {
     if (err) {
       if (err.message.includes('UNIQUE')) {
         return res.status(400).json({ detail: "Username already exists." });
@@ -497,16 +542,45 @@ app.get('/api/auth/me', (req, res) => {
   }
 
   const token = authHeader.split(' ')[1];
+
+  // Try dynamic session first
+  const session = verifyToken(token);
+  if (session) {
+    db.get('SELECT id, email, full_name FROM users WHERE id = ?', [session.userId], (err, user) => {
+      if (err || !user) {
+        return res.status(401).json({ detail: "Unauthorized access token." });
+      }
+      res.json(user);
+    });
+    return;
+  }
+
+  // Fallback to legacy base64 decoding
   try {
     const decoded = Buffer.from(token, 'base64').toString('ascii').split(':');
     const email = decoded[0];
     const password = decoded[1];
 
-    db.get('SELECT id, email, full_name FROM users WHERE email = ? AND password = ?', [email, password], (err, user) => {
+    db.get('SELECT id, email, password, full_name FROM users WHERE email = ?', [email], (err, user) => {
       if (err || !user) {
         return res.status(401).json({ detail: "Unauthorized access token." });
       }
-      res.json(user);
+      
+      const storedPassword = user.password;
+      let passwordMatched = false;
+      if (storedPassword.includes(':')) {
+        const [salt, hash] = storedPassword.split(':');
+        const checkHash = crypto.pbkdf2Sync(password, salt, 10000, 64, 'sha512').toString('hex');
+        passwordMatched = (checkHash === hash);
+      } else {
+        passwordMatched = (storedPassword === password);
+      }
+
+      if (!passwordMatched) {
+        return res.status(401).json({ detail: "Unauthorized access token." });
+      }
+      
+      res.json({ id: user.id, email: user.email, full_name: user.full_name });
     });
   } catch (e) {
     return res.status(401).json({ detail: "Invalid session token." });

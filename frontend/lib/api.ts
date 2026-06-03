@@ -49,7 +49,7 @@ export async function apiClient<T = any>(
       if (response.status === 401 || response.status === 403) {
         if (typeof window !== "undefined") {
           // Clear token to force re-auth
-          localStorage.removeItem("auth_token");
+          localStorage.removeItem("token");
         }
         throw new Error("Session expired. Please log in again.");
       }
