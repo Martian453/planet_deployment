@@ -18,8 +18,8 @@ export const metadata: Metadata = {
   description: 'Real-time environmental monitoring dashboard for air quality and groundwater levels',
   generator: 'v0.app',
   icons: {
-    icon: '/logo.png',
-    apple: '/logo.png',
+    icon: '/favicon.png',
+    apple: '/favicon.png',
   },
 }
 

@@ -617,40 +617,95 @@ app.get('/api/devices', requireDashboardAuth, (req, res) => {
 // --- WEBSOCKET LOGIC ---
 
 wss.on('connection', (ws, req) => {
-  // AUDIT FIX (Finding 4.3 — Critical): Require dynamic token checking on WebSocket connection
   const urlParams = new URL(req.url, `http://${req.headers.host || 'localhost'}`).searchParams;
   const token = urlParams.get('token');
   const DASHBOARD_TOKEN = process.env.DASHBOARD_TOKEN || null;
 
-  if (DASHBOARD_TOKEN && token !== DASHBOARD_TOKEN) {
-    console.warn(`🚫 WebSocket connection rejected: Invalid or missing token from ${req.socket.remoteAddress}`);
-    ws.close(4001, 'Unauthorized');
+  const handleAuthResult = (isAuthorized) => {
+    if (!isAuthorized) {
+      console.warn(`🚫 WebSocket connection rejected: Invalid or missing token from ${req.socket.remoteAddress}`);
+      // Send message to client before closing to make debugging easier
+      ws.send(JSON.stringify({ type: 'error', message: 'Unauthorized WebSocket connection.' }));
+      ws.close(4001, 'Unauthorized');
+      return;
+    }
+
+    console.log('📱 Dashboard App Connected via WebSocket');
+    clients.add(ws);
+
+    // Small heartbeat to keep connection alive
+    const heartbeat = setInterval(() => {
+      if (ws.readyState === WebSocket.OPEN) {
+        ws.send(JSON.stringify({ type: 'heartbeat', timestamp: new Date().toISOString() }));
+      }
+    }, 10000);
+
+    const cleanup = () => {
+      clearInterval(heartbeat);
+      clients.delete(ws);
+    };
+
+    ws.on('close', () => {
+      cleanup();
+      console.log('❌ Dashboard Disconnected');
+    });
+
+    ws.on('error', () => {
+      cleanup();
+    });
+  };
+
+  // 1. Direct environment variable token match
+  if (DASHBOARD_TOKEN && token === DASHBOARD_TOKEN) {
+    handleAuthResult(true);
     return;
   }
 
-  console.log('📱 Dashboard App Connected via WebSocket');
-  clients.add(ws);
-
-  // Small heartbeat to keep connection alive
-  const heartbeat = setInterval(() => {
-    if (ws.readyState === WebSocket.OPEN) {
-      ws.send(JSON.stringify({ type: 'heartbeat', timestamp: new Date().toISOString() }));
+  // 2. Verify dynamic session token or legacy fallback
+  if (token) {
+    const session = verifyToken(token);
+    if (session) {
+      db.get('SELECT id FROM users WHERE id = ?', [session.userId], (err, user) => {
+        handleAuthResult(!err && !!user);
+      });
+      return;
     }
-  }, 10000);
 
-  const cleanup = () => {
-    clearInterval(heartbeat);
-    clients.delete(ws);
-  };
+    // Try legacy base64 validation
+    try {
+      const decoded = Buffer.from(token, 'base64').toString('ascii').split(':');
+      const email = decoded[0];
+      const password = decoded[1];
+      if (email && password) {
+        db.get('SELECT password FROM users WHERE email = ?', [email], (err, user) => {
+          if (err || !user) {
+            handleAuthResult(false);
+            return;
+          }
+          const storedPassword = user.password;
+          let passwordMatched = false;
+          if (storedPassword.includes(':')) {
+            const [salt, hash] = storedPassword.split(':');
+            const checkHash = crypto.pbkdf2Sync(password, salt, 10000, 64, 'sha512').toString('hex');
+            passwordMatched = (checkHash === hash);
+          } else {
+            passwordMatched = (storedPassword === password);
+          }
+          handleAuthResult(passwordMatched);
+        });
+        return;
+      }
+    } catch (e) {
+      // Ignore
+    }
+  }
 
-  ws.on('close', () => {
-    cleanup();
-    console.log('❌ Dashboard Disconnected');
-  });
-
-  ws.on('error', () => {
-    cleanup();
-  });
+  // If no auth matches and DASHBOARD_TOKEN is set, reject. Otherwise, allow.
+  if (DASHBOARD_TOKEN) {
+    handleAuthResult(false);
+  } else {
+    handleAuthResult(true);
+  }
 });
 
 function broadcast(data) {
