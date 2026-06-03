@@ -589,7 +589,7 @@ export function PrivateDashboard() {
                         else if (irms < 4) derivedStatus = "LOW";
                         else if (irms < 7) derivedStatus = "MID";
                         else if (irms < 12) derivedStatus = "HIGH";
-                        else derivedStatus = "CRITICAL";
+                        else derivedStatus = "CHARGING";
                     }
                 } else if (!prev?.pump_status || prev.pump_status === 'N/A') {
                     const level = incomingLevel ?? prev?.level ?? 4.5;
@@ -597,7 +597,7 @@ export function PrivateDashboard() {
                     else if (level < 4) derivedStatus = "LOW";
                     else if (level < 7) derivedStatus = "MID";
                     else if (level < 12) derivedStatus = "HIGH";
-                    else derivedStatus = "CRITICAL";
+                    else derivedStatus = "CHARGING";
                 }
 
                 return {
@@ -751,7 +751,7 @@ export function PrivateDashboard() {
                     if (irms < 4) pump_status = "LOW";
                     else if (irms < 7) pump_status = "MID";
                     else if (irms < 12) pump_status = "HIGH";
-                    else pump_status = "CRITICAL";
+                    else pump_status = "CHARGING";
                 }
 
                 setLastWaterTime(Date.now());

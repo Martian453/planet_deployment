@@ -14,25 +14,12 @@ const spaceGrotesk = {
 };
 
 export const metadata: Metadata = {
-  title: 'Air & Groundwater Intelligence Dashboard',
+  title: 'Trifecta insights',
   description: 'Real-time environmental monitoring dashboard for air quality and groundwater levels',
   generator: 'v0.app',
   icons: {
-    icon: [
-      {
-        url: '/icon-light-32x32.png',
-        media: '(prefers-color-scheme: light)',
-      },
-      {
-        url: '/icon-dark-32x32.png',
-        media: '(prefers-color-scheme: dark)',
-      },
-      {
-        url: '/icon.svg',
-        type: 'image/svg+xml',
-      },
-    ],
-    apple: '/apple-icon.png',
+    icon: '/logo.png',
+    apple: '/logo.png',
   },
 }
 

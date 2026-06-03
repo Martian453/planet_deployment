@@ -111,7 +111,7 @@ export function SpeedometerGauge({
 
   // 4 color-coded zones: Left→Right = CRITICAL → LOW → MID → HIGH based on Amps
   const zones = [
-    { label: "CRITICAL", from: 0, to: 0.25, color: "#d91536e8" },   // Vibrant Red (Off/dry run)
+    { label: "CHARGING", from: 0, to: 0.25, color: "#d91536e8" },   // Vibrant Red (Off/dry run)
     { label: "LOW", from: 0.25, to: 0.5, color: "#f3f627f8" },      // Warm Orange
     { label: "MID", from: 0.5, to: 0.75, color: "#377deeff" },      // Bright Blue (Normal operation)
     { label: "HIGH", from: 0.75, to: 1, color: "#22c55eff" },       // Vivid Green
@@ -120,7 +120,7 @@ export function SpeedometerGauge({
   // Map status string → ratio (center of the zone)
   const statusToRatio: Record<string, number> = {
     "OFF": 0.125,
-    "CRITICAL": 0.125,
+    "CHARGING": 0.125,
     "LOW": 0.375,
     "MID": 0.625,
     "HIGH": 0.875,
@@ -227,7 +227,7 @@ export function SpeedometerGauge({
           <circle cx={cx} cy={cy} r="7" fill="#38bdf8" />
 
           {/* Zone labels */}
-          <text x="50" y="170" textAnchor="start" className="text-[12px] font-black" fill="#ef4444">CRITICAL</text>
+          <text x="50" y="170" textAnchor="start" className="text-[12px] font-black" fill="#ef4444">CHARGING</text>
           <text x="135" y="75" textAnchor="middle" className="text-[12px] font-black" fill="#eab308">LOW</text>
           <text x="215" y="75" textAnchor="middle" className="text-[12px] font-black" fill="#3b82f6">MID</text>
           <text x="310" y="170" textAnchor="end" className="text-[12px] font-black" fill="#22c55e">HIGH</text>

@@ -60,7 +60,7 @@ export function BorewellHealthIndex({
       ? (efficiency > 0 ? Math.min(100, Math.max(30, Math.round(efficiency))) : 85)
       : 95;
     
-    const mechanicalStatus = mechanicalScore >= 75 ? "NOMINAL" : "CAUTION";
+    const mechanicalStatus = mechanicalScore >= 75 ? "NOMINAL" : "GOOD";
     const mechanicalColor = mechanicalStatus === "NOMINAL" ? "#10b981" : "#f59e0b";
     const mechanicalGlow = mechanicalStatus === "NOMINAL" ? "rgba(16, 185, 129, 0.4)" : "rgba(245, 158, 11, 0.4)";
 
@@ -69,7 +69,7 @@ export function BorewellHealthIndex({
     const flowScore = isMotorOn ? Math.min(100, Math.max(10, (flowRate / 45.0) * 100)) : 90;
     const hydrologicalScore = Math.round((levelScore + flowScore) / 2);
     
-    const hydrologicalStatus = hydrologicalScore >= 75 ? "NOMINAL" : "CAUTION";
+    const hydrologicalStatus = hydrologicalScore >= 75 ? "NOMINAL" : "GOOD";
     const hydrologicalColor = hydrologicalStatus === "NOMINAL" ? "#10b981" : "#f59e0b";
     const hydrologicalGlow = hydrologicalStatus === "NOMINAL" ? "rgba(16, 185, 129, 0.4)" : "rgba(245, 158, 11, 0.4)";
 
@@ -79,7 +79,7 @@ export function BorewellHealthIndex({
     const turbidityScore = Math.max(0, 100 - turbidity * 8);
     const biochemicalScore = Math.round((phScore + tdsScore + turbidityScore) / 3);
 
-    const biochemicalStatus = biochemicalScore >= 75 ? "NOMINAL" : "CAUTION";
+    const biochemicalStatus = biochemicalScore >= 75 ? "NOMINAL" : "GOOD";
     const biochemicalColor = biochemicalStatus === "NOMINAL" ? "#10b981" : "#f59e0b";
     const biochemicalGlow = biochemicalStatus === "NOMINAL" ? "rgba(16, 185, 129, 0.4)" : "rgba(245, 158, 11, 0.4)";
 
@@ -115,7 +115,7 @@ export function BorewellHealthIndex({
     return Math.round(pillars[0].score * 0.35 + pillars[1].score * 0.35 + pillars[2].score * 0.30)
   }, [pillars])
 
-  const verdictLabel = overallScore >= 75 ? "OPTIMAL" : "CAUTION"
+  const verdictLabel = overallScore >= 75 ? "OPTIMAL" : "GOOD"
   const verdictColor = overallScore >= 75 ? "text-emerald-400" : "text-amber-400"
   const verdictBg = overallScore >= 75 ? "bg-emerald-500/10 border-emerald-500/20" : "bg-amber-500/10 border-amber-500/20"
 
@@ -163,7 +163,7 @@ export function BorewellHealthIndex({
       if (pillars[0].score < 75) issues.push("low motor efficiency");
       if (pillars[1].score < 75) issues.push("aquifer drawdown");
       if (pillars[2].score < 75) issues.push("chemical deviation");
-      return `System caution. Detected ${issues.join(" and ") || "minor variations"}. Monitor performance.`;
+      return `System good. Detected ${issues.join(" and ") || "minor variations"}. Monitor performance.`;
     }
   }, [verdictLabel, pillars]);
 
@@ -275,7 +275,7 @@ export function BorewellHealthIndex({
       <div className="mt-2 flex items-center gap-2 rounded-lg bg-white/[0.03] px-2 py-1.5 relative z-10 border border-white/[0.04]">
         <div className={`flex h-1.5 w-1.5 rounded-full animate-pulse flex-shrink-0 ${verdictLabel === 'OPTIMAL' ? 'bg-emerald-400' : 'bg-amber-400'}`} />
         <p className="text-[9px] font-medium text-slate-400 leading-tight flex-1">
-          <span className="text-white font-bold">{verdictLabel === 'OPTIMAL' ? 'Hydraulic stable.' : 'System alert.'}</span> {diagnosticText}
+          <span className="text-white font-bold">{verdictLabel === 'OPTIMAL' ? 'Hydraulic stable.' : 'System good.'}</span> {diagnosticText}
         </p>
         <span className={`text-[9px] font-mono font-bold uppercase flex-shrink-0 ${isOffline ? 'text-amber-400' : 'text-blue-400'}`}>
           {isOffline ? 'Offline' : 'Live'}
