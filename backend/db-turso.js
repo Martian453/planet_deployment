@@ -133,7 +133,7 @@ function createTursoDb() {
   initSchema(client).then(() => {
     console.log('✅ Turso schema ready — database is persistent across Render restarts');
   }).catch(err => {
-    console.error('❌ Turso schema init failed:', err.message);
+    console.error('❌ Turso schema init failed:', err);
   });
 
   return db;
@@ -143,78 +143,66 @@ function createTursoDb() {
 async function initSchema(client) {
   // Step 1: Create all tables in one atomic batch (guaranteed ordering)
   await client.batch([
-    {
-      sql: `CREATE TABLE IF NOT EXISTS users (
-        id        INTEGER PRIMARY KEY AUTOINCREMENT,
-        email     TEXT UNIQUE,
-        password  TEXT,
-        full_name TEXT
-      )`
-    },
-    {
-      sql: `CREATE TABLE IF NOT EXISTS borewell_state (
-        id               TEXT PRIMARY KEY,
-        name             TEXT,
-        is_motor_on      INTEGER DEFAULT 0,
-        flow_rate        REAL    DEFAULT 0,
-        efficiency       REAL    DEFAULT 0,
-        voltage          REAL    DEFAULT 0,
-        current          REAL    DEFAULT 0,
-        run_time_total   REAL    DEFAULT 0,
-        water_level      REAL    DEFAULT 0,
-        ph               REAL    DEFAULT 7.2,
-        tds              REAL    DEFAULT 250,
-        turbidity        REAL    DEFAULT 1.2,
-        total_liters     REAL    DEFAULT 0,
-        current_status   TEXT,
-        water_status     TEXT,
-        turbidity_status TEXT,
-        tds_status       TEXT,
-        last_updated     TEXT    DEFAULT (datetime('now'))
-      )`
-    },
-    {
-      sql: `CREATE TABLE IF NOT EXISTS readings_history (
-        id               INTEGER PRIMARY KEY AUTOINCREMENT,
-        borewell_id      TEXT,
-        flow_rate        REAL,
-        water_level      REAL,
-        efficiency       REAL,
-        voltage          REAL,
-        current          REAL,
-        ph               REAL,
-        tds              REAL,
-        turbidity        REAL,
-        total_liters     REAL,
-        current_status   TEXT,
-        water_status     TEXT,
-        turbidity_status TEXT,
-        tds_status       TEXT,
-        timestamp        TEXT    DEFAULT (datetime('now'))
-      )`
-    },
-    {
-      sql: `CREATE TABLE IF NOT EXISTS aqi_history (
-        id        INTEGER PRIMARY KEY AUTOINCREMENT,
-        pm25      REAL,
-        pm10      REAL,
-        co2       REAL,
-        tvoc      REAL,
-        hcho      REAL,
-        temp      REAL,
-        humidity  REAL,
-        aqi       REAL,
-        timestamp TEXT DEFAULT (datetime('now'))
-      )`
-    },
-    {
-      sql: `CREATE INDEX IF NOT EXISTS idx_readings_borewell_time
-            ON readings_history(borewell_id, timestamp)`
-    },
-    {
-      sql: `CREATE INDEX IF NOT EXISTS idx_aqi_time
-            ON aqi_history(timestamp)`
-    },
+    `CREATE TABLE IF NOT EXISTS users (
+      id        INTEGER PRIMARY KEY AUTOINCREMENT,
+      email     TEXT UNIQUE,
+      password  TEXT,
+      full_name TEXT
+    )`,
+    `CREATE TABLE IF NOT EXISTS borewell_state (
+      id               TEXT PRIMARY KEY,
+      name             TEXT,
+      is_motor_on      INTEGER DEFAULT 0,
+      flow_rate        REAL    DEFAULT 0,
+      efficiency       REAL    DEFAULT 0,
+      voltage          REAL    DEFAULT 0,
+      current          REAL    DEFAULT 0,
+      run_time_total   REAL    DEFAULT 0,
+      water_level      REAL    DEFAULT 0,
+      ph               REAL    DEFAULT 7.2,
+      tds              REAL    DEFAULT 250,
+      turbidity        REAL    DEFAULT 1.2,
+      total_liters     REAL    DEFAULT 0,
+      current_status   TEXT,
+      water_status     TEXT,
+      turbidity_status TEXT,
+      tds_status       TEXT,
+      last_updated     TEXT    DEFAULT (datetime('now'))
+    )`,
+    `CREATE TABLE IF NOT EXISTS readings_history (
+      id               INTEGER PRIMARY KEY AUTOINCREMENT,
+      borewell_id      TEXT,
+      flow_rate        REAL,
+      water_level      REAL,
+      efficiency       REAL,
+      voltage          REAL,
+      current          REAL,
+      ph               REAL,
+      tds              REAL,
+      turbidity        REAL,
+      total_liters     REAL,
+      current_status   TEXT,
+      water_status     TEXT,
+      turbidity_status TEXT,
+      tds_status       TEXT,
+      timestamp        TEXT    DEFAULT (datetime('now'))
+    )`,
+    `CREATE TABLE IF NOT EXISTS aqi_history (
+      id        INTEGER PRIMARY KEY AUTOINCREMENT,
+      pm25      REAL,
+      pm10      REAL,
+      co2       REAL,
+      tvoc      REAL,
+      hcho      REAL,
+      temp      REAL,
+      humidity  REAL,
+      aqi       REAL,
+      timestamp TEXT DEFAULT (datetime('now'))
+    )`,
+    `CREATE INDEX IF NOT EXISTS idx_readings_borewell_time
+          ON readings_history(borewell_id, timestamp)`,
+    `CREATE INDEX IF NOT EXISTS idx_aqi_time
+          ON aqi_history(timestamp)`
   ], 'write');
 
   // Step 2: Seed default login user — only if missing
@@ -246,9 +234,9 @@ async function initSchema(client) {
   const bwRow = await client.execute('SELECT COUNT(*) as cnt FROM borewell_state');
   if (Number(bwRow.rows[0].cnt) === 0) {
     await client.batch([
-      { sql: "INSERT INTO borewell_state (id, name, water_level) VALUES ('BW-01', 'Borewell 1', 5.5)" },
-      { sql: "INSERT INTO borewell_state (id, name, water_level) VALUES ('BW-02', 'Borewell 2', 3.2)" },
-      { sql: "INSERT INTO borewell_state (id, name, water_level) VALUES ('BW-03', 'Borewell 3', 4.8)" },
+      "INSERT INTO borewell_state (id, name, water_level) VALUES ('BW-01', 'Borewell 1', 5.5)",
+      "INSERT INTO borewell_state (id, name, water_level) VALUES ('BW-02', 'Borewell 2', 3.2)",
+      "INSERT INTO borewell_state (id, name, water_level) VALUES ('BW-03', 'Borewell 3', 4.8)"
     ], 'write');
     console.log('✅ Borewell state seeded in Turso');
   }
