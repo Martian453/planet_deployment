@@ -212,12 +212,12 @@ export function ChartModal({
                                         <span className="text-[10px] font-black uppercase tracking-widest text-slate-500">Contribution</span>
                                     </div>
                                     <PollutantDonutChart
-                                        airData={data.length > 0 ? {
-                                            pm25: data[data.length - 1].pm25,
-                                            pm10: data[data.length - 1].pm10,
-                                            co2: data[data.length - 1].co2,
-                                            tvoc: data[data.length - 1].tvoc,
-                                            hcho: data[data.length - 1].hcho,
+                                        airData={data.length > 0 && data[data.length - 1] ? {
+                                            pm25: data[data.length - 1]?.pm25 ?? 0,
+                                            pm10: data[data.length - 1]?.pm10 ?? 0,
+                                            co2: data[data.length - 1]?.co2 ?? 400,
+                                            tvoc: data[data.length - 1]?.tvoc ?? 0,
+                                            hcho: data[data.length - 1]?.hcho ?? 0,
                                         } : undefined}
                                         transparent
                                     />
@@ -257,7 +257,7 @@ export function ChartModal({
                         {/* Current Summary Tiles */}
                         <div className="grid grid-cols-4 gap-4 mb-6">
                             {Object.entries(waterMetricConfig).map(([key, config]) => {
-                                const latestVal = data.length > 0 ? (data[data.length - 1] as any)[key] : 0;
+                                const latestVal = data.length > 0 && data[data.length - 1] ? (data[data.length - 1] as any)[key] : 0;
                                 const unit = key === "level" ? "ft" : key === "tds" ? "ppm" : key === "turbidity" ? "NTU" : "";
                                 return (
                                     <div

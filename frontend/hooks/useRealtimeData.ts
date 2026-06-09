@@ -74,8 +74,10 @@ export function useRealtimeData(locationId: string, token: string | null) {
                 reconnectTimeoutRef.current = setTimeout(connect, delay);
             };
 
-            ws.onerror = (err) => {
-                console.error("WebSocket error observed:", err);
+            ws.onerror = () => {
+                // NOTE: Browser WebSocket onerror events do not expose error details for security reasons.
+                // The connection will be closed and automatically reconnected via onclose → reconnect logic.
+                console.warn(`⚠️ WebSocket connection failed (${wsUrl.split('?')[0]}). Reconnect queued...`);
                 ws.close();
             };
         };

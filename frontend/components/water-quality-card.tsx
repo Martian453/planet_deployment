@@ -37,7 +37,6 @@ interface WaterQualityData {
 }
 
 import { generateWaterHistory, generateTimeLabels, type TimeRange } from "@/utils/data-simulator"
-import { Maximize2 } from "lucide-react"
 
 interface WaterQualityCardProps {
   data: WaterQualityData
@@ -431,9 +430,8 @@ export function WaterQualityCard({
   return (
     <div
       className={`${transparent ? '' : 'relative h-full w-full overflow-hidden rounded-2xl border border-white/5 bg-slate-900/40 p-3 backdrop-blur-xl hover:shadow-[0_0_30px_rgba(6,182,212,0.1)]'} group flex min-h-0 flex-col transition-all duration-200 ${isVisible ? "opacity-100" : "opacity-0"
-        } cursor-pointer`}
+        }`}
       style={{ transitionDelay: "100ms" }}
-      onClick={onExpand}
     >
       {/* Animated background - removed to match Yearly Comparison style */}
 
@@ -469,14 +467,7 @@ export function WaterQualityCard({
               </div>
             )}
 
-            {onExpand && (
-              <button
-                onClick={(e) => { e.stopPropagation(); onExpand(); }}
-                className="rounded-full bg-white/5 p-1.5 text-cyan-400/70 transition-colors hover:bg-white/10 hover:text-cyan-400"
-              >
-                <Maximize2 className="h-3.5 w-3.5" />
-              </button>
-            )}
+            {/* Expand button removed — modal caused client-side exception */}
           </div>
         </div>
       )}

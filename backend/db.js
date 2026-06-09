@@ -1,3 +1,15 @@
+// ─── Cloud DB: Auto-detect Turso for Render free tier ────────────────────────
+// Set TURSO_DATABASE_URL + TURSO_AUTH_TOKEN on Render → persistent cloud SQLite.
+// Leave them unset locally → uses the local environment.db file as before.
+if (process.env.TURSO_DATABASE_URL && process.env.TURSO_AUTH_TOKEN) {
+  console.log('☁️  Turso detected — using persistent cloud SQLite (survives Render restarts)');
+  const { createTursoDb } = require('./db-turso');
+  module.exports = createTursoDb();
+  return; // Skip all local SQLite code below
+}
+console.log('💾 Using local SQLite (ephemeral on Render free tier — set TURSO_* env vars to persist)');
+// ─────────────────────────────────────────────────────────────────────────────
+
 const sqlite3 = require('sqlite3').verbose();
 const path = require('path');
 const crypto = require('crypto');
@@ -31,7 +43,20 @@ db.serialize(() => {
 
   db.get("SELECT COUNT(*) as count FROM users WHERE email = 'trifecta'", (err, row) => {
     if (row && row.count === 0) {
-      const hashedPassword = hashPassword('12345');
+      // Use configured password from env var, or generate a secure random one
+      const adminPassword = process.env.DEFAULT_ADMIN_PASSWORD
+        || (() => {
+            const rand = crypto.randomBytes(12).toString('base64url');
+            console.log('🔑 ══════════════════════════════════════════════════');
+            console.log('🔑  FIRST-BOOT ADMIN CREDENTIALS (save these now!)');
+            console.log(`🔑  Username : trifecta`);
+            console.log(`🔑  Password : ${rand}`);
+            console.log('🔑  To keep this password across restarts, set:');
+            console.log('🔑  DEFAULT_ADMIN_PASSWORD env var in Render Dashboard');
+            console.log('🔑 ══════════════════════════════════════════════════');
+            return rand;
+          })();
+      const hashedPassword = hashPassword(adminPassword);
       db.run("INSERT INTO users (email, password, full_name) VALUES ('trifecta', ?, 'Trifecta Admin')", [hashedPassword]);
     }
   });
@@ -122,12 +147,12 @@ db.serialize(() => {
       const stmt = db.prepare(`INSERT INTO readings_history 
         (borewell_id, flow_rate, water_level, efficiency, voltage, current, ph, tds, turbidity, timestamp) 
         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`);
-      
+
       const now = Date.now();
       for (let i = 24; i >= 0; i--) {
         const timeOffset = now - i * 3600 * 1000;
         const timeStr = new Date(timeOffset).toISOString().replace('T', ' ').substring(0, 19);
-        
+
         const t = (24 - i) / 24;
         const lvl = parseFloat((5.2 + Math.sin(t * Math.PI * 2) * 0.4 + Math.random() * 0.1).toFixed(2));
         const ph = parseFloat((7.35 + Math.sin(t * Math.PI * 4) * 0.15 + Math.random() * 0.05).toFixed(2));
@@ -137,7 +162,7 @@ db.serialize(() => {
         const eff = 0.0;
         const v = 230.0;
         const a = 0.0;
-        
+
         stmt.run('BW-01', flow, lvl, eff, v, a, ph, tds, turb, timeStr);
       }
       stmt.finalize();

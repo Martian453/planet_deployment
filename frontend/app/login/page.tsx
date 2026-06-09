@@ -128,13 +128,6 @@ export default function LoginPage() {
             </button>
           </form>
 
-          {process.env.NODE_ENV !== "production" && (
-            <div className="mt-6 p-3.5 rounded-xl bg-emerald-500/5 border border-emerald-500/10 text-slate-400 text-[9px] leading-relaxed">
-              <span className="font-bold text-emerald-400 uppercase tracking-wider block mb-1">Demo Access Credentials</span>
-              Log in using default ID <strong className="text-white font-mono bg-slate-950 px-1 py-0.5 rounded">trifecta</strong> and password <strong className="text-white font-mono bg-slate-950 px-1 py-0.5 rounded">12345</strong>, or register a new user ID below.
-            </div>
-          )}
-
           <div className="mt-6 text-center">
             <Link href="/signup" className="text-[10px] text-slate-400 hover:text-emerald-400 transition-colors font-medium">
               No uplink detected? Register Node

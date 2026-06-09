@@ -1027,24 +1027,24 @@ export function PrivateDashboard() {
 
     // Fullscreen Modal Data Mapping
     const getModalData = () => {
-        if (modalConfig.type === 'aqi' && safeAirData.chartData.labels.length > 0) {
+        if (modalConfig.type === 'aqi' && safeAirData.chartData?.labels?.length > 0) {
             return safeAirData.chartData.labels.map((l, i) => ({
                 time: l,
-                pm25: safeAirData.chartData.pm25[i],
-                pm10: safeAirData.chartData.pm10[i],
-                co2: safeAirData.chartData.co2[i],
-                tvoc: safeAirData.chartData.tvoc[i],
-                hcho: safeAirData.chartData.hcho?.[i] || 0,
-                temp: safeAirData.chartData.temp?.[i] || 0,
-                humidity: safeAirData.chartData.humidity?.[i] || 0,
+                pm25: safeAirData.chartData.pm25?.[i] ?? 0,
+                pm10: safeAirData.chartData.pm10?.[i] ?? 0,
+                co2: safeAirData.chartData.co2?.[i] ?? 400,
+                tvoc: safeAirData.chartData.tvoc?.[i] ?? 0,
+                hcho: safeAirData.chartData.hcho?.[i] ?? 0,
+                temp: safeAirData.chartData.temp?.[i] ?? 0,
+                humidity: safeAirData.chartData.humidity?.[i] ?? 0,
             }));
         }
-        if (modalConfig.type === 'water' && safeWaterData.chartData.labels.length > 0) {
+        if (modalConfig.type === 'water' && safeWaterData.chartData?.labels?.length > 0) {
             return safeWaterData.chartData.labels.map((l, i) => ({
                 time: l,
-                level: safeWaterData.chartData.level[i],
-                ph: safeWaterData.chartData.ph[i],
-                tds: safeWaterData.chartData.tds[i],
+                level: safeWaterData.chartData.level?.[i] ?? 0,
+                ph: safeWaterData.chartData.ph?.[i] ?? 7.2,
+                tds: safeWaterData.chartData.tds?.[i] ?? 250,
                 turbidity: (safeWaterData.chartData as any).turbidity?.[i] ?? 0,
             }));
         }
@@ -1296,8 +1296,8 @@ export function PrivateDashboard() {
                                         <div className="flex flex-col gap-1.5 flex-1 min-h-0 overflow-y-auto scrollbar-thin scrollbar-thumb-white/10">
                                             {(() => {
                                                 const now = currentTime;
-                                                const isWaterOnline = wsConnected && lastWaterTime > 0 && (now - lastWaterTime < 300000);
-                                                const isAirOnline = wsConnected && lastAirTime > 0 && (now - lastAirTime < 300000);
+                                                const isWaterOnline = wsConnected && lastWaterTime > 0 && (now - lastWaterTime < 30000);
+                                                const isAirOnline = wsConnected && lastAirTime > 0 && (now - lastAirTime < 30000);
                                                 const isLoraHubOnline = isWaterOnline && isAirOnline ? true : (isAirOnline ? false : (isWaterOnline ? true : false));
                                                 const isGwOnline = isWaterOnline && isAirOnline ? true : (isAirOnline ? false : (isWaterOnline ? true : false));
                                                 const isWaterNodeOnline = isWaterOnline && isAirOnline ? true : (isAirOnline ? false : (isWaterOnline ? true : false));

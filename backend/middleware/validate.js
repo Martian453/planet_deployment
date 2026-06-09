@@ -144,6 +144,7 @@ function validateAqiPayload(req, res, next) {
     const pm25 = safeFloat(p.pm25);
     const pm10 = safeFloat(p.pm10);
     if (pm25 === null && pm10 === null) {
+        console.warn('🚫 AQI rejected — missing pm25/pm10. Full normalized body:', JSON.stringify(p));
         return res.status(400).json({ error: 'AQI payload must include at least pm25 or pm10.' });
     }
 

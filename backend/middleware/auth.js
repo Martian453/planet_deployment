@@ -56,7 +56,7 @@ function requireApiKey(req, res, next) {
 const db = require('../db');
 const crypto = require('crypto');
 
-const secret = process.env.SESSION_SECRET || 'fallback-secret-for-session-signing-1234';
+const { SESSION_SECRET: secret } = require('../config');
 
 function verifyToken(token) {
   try {
@@ -125,10 +125,13 @@ function requireDashboardAuth(req, res, next) {
                 let passwordMatched = false;
                 if (storedPassword.includes(':')) {
                     const [salt, hash] = storedPassword.split(':');
-                    const checkHash = crypto.pbkdf2Sync(password, salt, 10000, 64, 'sha512').toString('hex');
-                    passwordMatched = (checkHash === hash);
+                    const checkHashBuf = crypto.pbkdf2Sync(password, salt, 10000, 64, 'sha512');
+                    const storedHashBuf = Buffer.from(hash, 'hex');
+                    passwordMatched = checkHashBuf.length === storedHashBuf.length &&
+                        crypto.timingSafeEqual(checkHashBuf, storedHashBuf);
                 } else {
-                    passwordMatched = (storedPassword === password);
+                    passwordMatched = storedPassword.length === password.length &&
+                        crypto.timingSafeEqual(Buffer.from(storedPassword), Buffer.from(password));
                 }
 
                 if (!passwordMatched) {

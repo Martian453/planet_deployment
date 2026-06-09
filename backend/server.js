@@ -28,6 +28,18 @@ const wss = new WebSocket.Server({ server });
 
 const PORT = process.env.PORT || 8000;
 
+// --- STARTUP SECURITY CHECK ---
+// Warn loudly if critical env vars are missing so misconfiguration is immediately visible in Render logs
+const missingEnvVars = [];
+if (!process.env.DEVICE_API_KEY) missingEnvVars.push('DEVICE_API_KEY');
+if (!process.env.SESSION_SECRET)  missingEnvVars.push('SESSION_SECRET');
+if (missingEnvVars.length > 0) {
+  console.warn('⚠️  SECURITY WARNING: The following environment variables are NOT set:');
+  missingEnvVars.forEach(v => console.warn(`   - ${v}`));
+  console.warn('   Device and session auth are running in OPEN/INSECURE mode.');
+  console.warn('   Set these in your Render Dashboard → Environment section.');
+}
+
 // Store connected browser clients
 const clients = new Set();
 
@@ -385,7 +397,56 @@ function calculateCpcbSubIndex(conc, pollutant) {
   return Math.round(((range.iH - range.iL) / (range.cH - range.cL)) * (conc - range.cL) + range.iL);
 }
 
-app.post('/api/aqi', requireApiKey, validateAqiPayload, (req, res) => {
+// AQI Field-Name Normalizer
+// Maps every known ESP32 / sensor firmware variant to the canonical field name.
+// This runs BEFORE validation so firmware-locked devices are never rejected for naming differences.
+function normalizeAqiPayload(raw) {
+  const p = {};
+
+  // pm25 aliases: pm2_5, pm2.5, PM25, PM2.5, PM2_5, pm25, particulate25, pm_2_5
+  const pm25Val = raw.pm25 ?? raw.pm2_5 ?? raw['pm2.5'] ?? raw.PM25 ?? raw['PM2.5'] ?? raw.PM2_5 ?? raw.particulate25 ?? raw.pm_2_5;
+  if (pm25Val !== undefined) p.pm25 = pm25Val;
+
+  // pm10 aliases: PM10, pm_10, particulate10
+  const pm10Val = raw.pm10 ?? raw.PM10 ?? raw.pm_10 ?? raw.particulate10;
+  if (pm10Val !== undefined) p.pm10 = pm10Val;
+
+  // co2 aliases: co2_ppm, CO2, carbondioxide, carbon_dioxide
+  const co2Val = raw.co2 ?? raw.co2_ppm ?? raw.CO2 ?? raw.carbondioxide ?? raw.carbon_dioxide;
+  if (co2Val !== undefined) p.co2 = co2Val;
+
+  // tvoc aliases: TVOC, tVOC, voc, VOC, total_voc
+  const tvocVal = raw.tvoc ?? raw.TVOC ?? raw.tVOC ?? raw.voc ?? raw.VOC ?? raw.total_voc;
+  if (tvocVal !== undefined) p.tvoc = tvocVal;
+
+  // hcho aliases: HCHO, hco, formaldehyde, formalin
+  const hchoVal = raw.hcho ?? raw.HCHO ?? raw.hco ?? raw.formaldehyde ?? raw.formalin;
+  if (hchoVal !== undefined) p.hcho = hchoVal;
+
+  // temp aliases: temperature, TEMP, Temperature, tmp, t
+  const tempVal = raw.temp ?? raw.temperature ?? raw.TEMP ?? raw.Temperature ?? raw.tmp ?? raw.t;
+  if (tempVal !== undefined) p.temp = tempVal;
+
+  // humidity aliases: hum, RH, rh, Humidity, HUMIDITY
+  const humVal = raw.humidity ?? raw.hum ?? raw.RH ?? raw.rh ?? raw.Humidity ?? raw.HUMIDITY;
+  if (humVal !== undefined) p.humidity = humVal;
+
+  return p;
+}
+
+app.post('/api/aqi', requireApiKey, (req, res, next) => {
+  // ── DIAGNOSTIC LOG ─────────────────────────────────────────────────────────
+  // Prints the raw body BEFORE any validation so you can see exactly what the
+  // ESP32 is sending — check Render logs for "📡 AQI RAW PAYLOAD" lines.
+  console.log('📡 AQI RAW PAYLOAD received from', req.ip, '→', JSON.stringify(req.body));
+  // ───────────────────────────────────────────────────────────────────────────
+
+  // Normalize field names to handle any ESP32 firmware variant
+  req.body = normalizeAqiPayload(req.body);
+  console.log('🔄 AQI Normalized payload →', JSON.stringify(req.body));
+
+  next();
+}, validateAqiPayload, (req, res) => {
   const { pm25, pm10, co2, tvoc, hcho, temp, humidity } = req.body;
   
   // Safe parsing values
@@ -435,7 +496,6 @@ app.post('/api/aqi', requireApiKey, validateAqiPayload, (req, res) => {
 
       console.log(`🌬️ AQI Data Ingested: ${score} (${getCategory(score)}). PM2.5=${safePm25}`);
 
-      // AUDIT FIX (Finding 2.2 — Critical): Send response inside the db run callback block only
       res.json({
         aqi: score,
         category: getCategory(score),
@@ -448,7 +508,7 @@ app.post('/api/aqi', requireApiKey, validateAqiPayload, (req, res) => {
 // --- AUTHENTICATION ENDPOINTS ---
 
 const crypto = require('crypto');
-const secret = process.env.SESSION_SECRET || 'fallback-secret-for-session-signing-1234';
+const { SESSION_SECRET: secret } = require('./config');
 
 function hashPassword(password, salt) {
   const finalSalt = salt || crypto.randomBytes(16).toString('hex');
@@ -498,10 +558,14 @@ app.post('/api/auth/login', (req, res) => {
     let passwordMatched = false;
     if (storedPassword.includes(':')) {
       const [salt, hash] = storedPassword.split(':');
-      const checkHash = crypto.pbkdf2Sync(password, salt, 10000, 64, 'sha512').toString('hex');
-      passwordMatched = (checkHash === hash);
+      const checkHashBuf = crypto.pbkdf2Sync(password, salt, 10000, 64, 'sha512');
+      const storedHashBuf = Buffer.from(hash, 'hex');
+      passwordMatched = checkHashBuf.length === storedHashBuf.length &&
+        crypto.timingSafeEqual(checkHashBuf, storedHashBuf);
     } else {
-      passwordMatched = (storedPassword === password);
+      // Legacy plaintext fallback (timing-safe via fixed-length comparison)
+      passwordMatched = storedPassword.length === password.length &&
+        crypto.timingSafeEqual(Buffer.from(storedPassword), Buffer.from(password));
     }
 
     if (!passwordMatched) {
@@ -571,10 +635,13 @@ app.get('/api/auth/me', (req, res) => {
       let passwordMatched = false;
       if (storedPassword.includes(':')) {
         const [salt, hash] = storedPassword.split(':');
-        const checkHash = crypto.pbkdf2Sync(password, salt, 10000, 64, 'sha512').toString('hex');
-        passwordMatched = (checkHash === hash);
+        const checkHashBuf = crypto.pbkdf2Sync(password, salt, 10000, 64, 'sha512');
+        const storedHashBuf = Buffer.from(hash, 'hex');
+        passwordMatched = checkHashBuf.length === storedHashBuf.length &&
+          crypto.timingSafeEqual(checkHashBuf, storedHashBuf);
       } else {
-        passwordMatched = (storedPassword === password);
+        passwordMatched = storedPassword.length === password.length &&
+          crypto.timingSafeEqual(Buffer.from(storedPassword), Buffer.from(password));
       }
 
       if (!passwordMatched) {
@@ -605,14 +672,37 @@ app.get('/api/location/:name/capabilities', requireDashboardAuth, (req, res) => 
   res.json({ has_aqi: true, has_water: true });
 });
 
-// 6. Devices Listing
+// 6. Devices Listing — dynamic status from DB timestamps
 app.get('/api/devices', requireDashboardAuth, (req, res) => {
-  res.json([
-    { device_id: "BW-GW-01", type: "GATEWAY", status: "ONLINE", location_id: "BLR-01", location_name: "BLR-01", last_seen: new Date().toISOString() },
-    { device_id: "BW-NODE-01", type: "SENSOR", status: "ONLINE", location_id: "BLR-01", location_name: "BLR-01", last_seen: new Date().toISOString() },
-    { device_id: "AQI-NODE-01", type: "SENSOR", status: "ONLINE", location_id: "BLR-01", location_name: "BLR-01", last_seen: new Date().toISOString() },
-    { device_id: "LORA-HUB", type: "BASE", status: "ONLINE", location_id: "BLR-01", location_name: "BLR-01", last_seen: new Date().toISOString() }
-  ]);
+  const ONLINE_THRESHOLD_MS = 30000; // 30 seconds
+
+  // Query latest water update and latest AQI entry in parallel
+  db.get("SELECT last_updated FROM borewell_state WHERE id = 'BW-01'", [], (err, bwRow) => {
+    db.get("SELECT timestamp FROM aqi_history ORDER BY id DESC LIMIT 1", [], (err2, aqiRow) => {
+      const now = Date.now();
+
+      // Parse SQLite timestamps (stored as "YYYY-MM-DD HH:MM:SS" in UTC)
+      const bwLastMs = bwRow?.last_updated
+        ? new Date(bwRow.last_updated.replace(' ', 'T') + 'Z').getTime()
+        : 0;
+      const aqiLastMs = aqiRow?.timestamp
+        ? new Date(aqiRow.timestamp.replace(' ', 'T') + 'Z').getTime()
+        : 0;
+
+      const isWaterOnline = bwLastMs > 0 && (now - bwLastMs) < ONLINE_THRESHOLD_MS;
+      const isAqiOnline   = aqiLastMs > 0 && (now - aqiLastMs) < ONLINE_THRESHOLD_MS;
+
+      const bwLastSeen  = bwLastMs  > 0 ? new Date(bwLastMs).toISOString()  : null;
+      const aqiLastSeen = aqiLastMs > 0 ? new Date(aqiLastMs).toISOString() : null;
+
+      res.json([
+        { device_id: "BW-GW-01",   type: "GATEWAY", status: isWaterOnline ? "ONLINE" : "OFFLINE", location_id: "BLR-01", location_name: "BLR-01", last_seen: bwLastSeen  },
+        { device_id: "BW-NODE-01", type: "SENSOR",  status: isWaterOnline ? "ONLINE" : "OFFLINE", location_id: "BLR-01", location_name: "BLR-01", last_seen: bwLastSeen  },
+        { device_id: "AQI-NODE-01",type: "SENSOR",  status: isAqiOnline   ? "ONLINE" : "OFFLINE", location_id: "BLR-01", location_name: "BLR-01", last_seen: aqiLastSeen },
+        { device_id: "LORA-HUB",   type: "BASE",    status: isWaterOnline ? "ONLINE" : "OFFLINE", location_id: "BLR-01", location_name: "BLR-01", last_seen: bwLastSeen  }
+      ]);
+    });
+  });
 });
 
 // --- WEBSOCKET LOGIC ---
@@ -687,10 +777,13 @@ wss.on('connection', (ws, req) => {
           let passwordMatched = false;
           if (storedPassword.includes(':')) {
             const [salt, hash] = storedPassword.split(':');
-            const checkHash = crypto.pbkdf2Sync(password, salt, 10000, 64, 'sha512').toString('hex');
-            passwordMatched = (checkHash === hash);
+            const checkHashBuf = crypto.pbkdf2Sync(password, salt, 10000, 64, 'sha512');
+            const storedHashBuf = Buffer.from(hash, 'hex');
+            passwordMatched = checkHashBuf.length === storedHashBuf.length &&
+              crypto.timingSafeEqual(checkHashBuf, storedHashBuf);
           } else {
-            passwordMatched = (storedPassword === password);
+            passwordMatched = storedPassword.length === password.length &&
+              crypto.timingSafeEqual(Buffer.from(storedPassword), Buffer.from(password));
           }
           handleAuthResult(passwordMatched);
         });
